@@ -1,0 +1,15 @@
+sdd:
+  initialized_by_plugin_version: 7.3.0
+  updated_by_plugin_version: 7.3.0
+  initialized_at: 2026-07-09 21:05:22Z
+  updated_at: 2026-07-09 21:05:22Z
+project:
+  name: edulogicsai-platform
+techpacks:
+  fs-ts:
+    name: fullstack-typescript
+    namespace: fs-ts
+    version: 1.0.0
+    mode: external
+    path: /Users/bennguyen/.claude/plugins/cache/sdd/sdd/7.3.0/fullstack-typescript
+components: []
