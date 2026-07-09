@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Write(changes/**)",
+      "Write(specs/**)",
+      "Write(domains/**)",
+      "Write(packages/**)",
+      "Edit(changes/**)",
+      "Edit(specs/**)",
+      "Edit(domains/**)",
+      "Edit(packages/**)"
+    ]
+  }
+}
