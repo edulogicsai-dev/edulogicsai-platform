@@ -1,0 +1,33 @@
+id: j2o3dr
+name: baseagent-domainconfig-contracts
+source: interactive
+created: 2026-07-09
+current: baseagent-domainconfig-contracts-1
+
+phase: review
+step: reviewing
+
+progress:
+  total_items: 1
+  specs_completed: 1
+  specs_pending: 0
+  plans_completed: 1
+  plans_pending: 0
+  implemented: 1
+  reviewed: 0
+
+items:
+  - id: baseagent-domainconfig-contracts-1
+    change_id: baseagent-domainconfig-contracts-1
+    title: BaseAgent Contract and DomainConfig Schema
+    type: feature
+    location: changes/2026/07/09/baseagent-domainconfig-contracts
+    context_sections: []
+    depends_on: []
+
+    spec_status: approved
+    plan_status: approved
+    impl_status: complete
+    review_status: ready_for_review
+
+    substep: null

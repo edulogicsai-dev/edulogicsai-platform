@@ -26,10 +26,12 @@ Platform code has zero if-statements for domain logic.
 - HITL Escalation Bus (Tier 1 auto / Tier 2 flagged / Tier 3 live human)
 
 ### L3 — Agent Fleet
-- BaseAgent abstract class (respond, stream, handoff_check, memory_write)
-- Domain Agent Registry (Dict[tenant_id → List[AgentClass]])
+- BaseAgent abstract class (fetchPrompt, respond, writeEpisodicMemory abstract; stream concrete — orchestrates the other three)
+- DomainRegistry (packages/core): domain id → DomainConfig, agent id → BaseAgent instance
 - Tool Registry via MCP (RAGTool, SentimentTool, CalendarTool, QuestionBankTool)
 - Prompt Registry (Langfuse, version-controlled, A/B testable)
+
+**Domain Registration Flow:** Each `domains/{domain}/` package self-registers — it calls `DomainRegistry.register(domainConfig)` as a side effect of import, rather than NEXUS importing a static list of domains. At boot, NEXUS resolves a `DomainConfig` by domain id, then resolves each `AgentDef` in `DomainConfig.agents` to a `BaseAgent` instance via `DomainRegistry.resolveAgent()`. This is what makes "zero platform code changes to add a domain" hold: `packages/core`'s `DomainRegistry` implementation contains no imports from any `domains/*` package.
 
 ### L4 — Memory & Knowledge
 - Tier 1: Working Memory (Redis, per session, last 10 turns)
