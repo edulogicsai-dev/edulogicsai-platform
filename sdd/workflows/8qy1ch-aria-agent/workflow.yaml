@@ -1,0 +1,33 @@
+id: 8qy1ch
+name: aria-agent
+source: interactive
+created: 2026-07-10
+current: aria-agent-1
+
+phase: review
+step: reviewing
+
+progress:
+  total_items: 1
+  specs_completed: 1
+  specs_pending: 0
+  plans_completed: 1
+  plans_pending: 0
+  implemented: 1
+  reviewed: 0
+
+items:
+  - id: aria-agent-1
+    change_id: aria-agent-1
+    title: ARIA — Adaptive Tutor Agent (MCAT)
+    type: feature
+    location: changes/2026/07/10/aria-agent
+    context_sections: []
+    depends_on: []
+
+    spec_status: approved
+    plan_status: approved
+    impl_status: complete
+    review_status: approved
+
+    substep: null

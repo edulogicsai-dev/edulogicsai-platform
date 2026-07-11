@@ -16,17 +16,23 @@ Region:  us-east-1
 URL:     https://cvxtqcebikmqaskvewlm.supabase.co
 
 ## Monorepo Structure
-packages/core/    — BaseAgent, NEXUS, DomainRegistry, contracts
+packages/core/    — BaseAgent/AgentInput/AgentOutput/DomainConfig CONTRACT TYPES (TypeScript only — no agent logic)
 packages/ui/      — Shared React components (domain-themeable via CSS vars)
 packages/memory/  — Mem0, pgvector helpers, FSRS spaced repetition
 packages/eval/    — EVAL agent, Ragas pipeline, PromptRegistry client
 apps/web/         — Next.js 14, domain theme via CSS custom properties
 apps/mobile/      — Expo SDK 55 React Native
-apps/backend/     — FastAPI, agent server, SSE streaming, background jobs
-domains/mcat/     — DomainConfig + 7 agent subclasses + prompts
-domains/gre/      — DomainConfig + 5 agents (Phase 2)
-domains/dat/      — DomainConfig + 6 agents (Phase 2)
+apps/backend/     — FastAPI, NEXUS, agent server (Python — see Agent Contract Architecture below), SSE streaming, background jobs
+domains/mcat/     — DomainConfig + prompts (Python-side); 7 agent implementations live under apps/backend/domains/mcat/agents/
+domains/gre/      — DomainConfig + prompts (Phase 2)
+domains/dat/      — DomainConfig + prompts (Phase 2)
 specs/            — SDD specs, one folder per feature
+
+## Agent Contract Architecture (Hybrid TS/Python)
+The BaseAgent/AgentInput/AgentOutput/DomainConfig contract exists in two forms that must stay shape-identical:
+- **packages/core (TypeScript)** — the CONTRACT: type definitions only. Consumed by apps/web and apps/mobile to parse SSE streams and render agent responses. No agent logic here.
+- **apps/backend (Python)** — the IMPLEMENTATION: actual agent logic (LLM calls via LiteLLM, RAG retrieval, sentiment analysis, handoff decisions), orchestrated by NEXUS via LangGraph, all running on FastAPI. Domain agent classes do NOT extend the TypeScript BaseAgent class (impossible across runtimes) — they conform to the same shape using Pydantic models that mirror AgentInput/AgentOutput field-for-field.
+- SSE serializes Python AgentOutput → JSON → frontend parses with the TypeScript AgentOutput type. Any field change must be applied to both the TypeScript types and the Pydantic models in the same change.
 
 ## Tech Stack
 Frontend Web:    Next.js 14, TypeScript, Tailwind, shadcn/ui
@@ -71,7 +77,8 @@ interface DomainConfig {
 - Specs: specs/{area}/{NAME}-SPEC.md
 
 ## Naming Conventions
-- Agent files:    domains/{domain}/agents/{name}.py
+- Agent implementation files: apps/backend/domains/{domain}/agents/{name}.py (Pydantic models mirror packages/core's TypeScript contract types)
+- Agent contract types:       packages/core/src/agent/*.ts (shared across all domains, not per-domain)
 - Prompt files:   domains/{domain}/prompts/{agent}_v1.md
 - Spec files:     specs/{area}/{NAME}-SPEC.md
 - DB migrations:  supabase/migrations/00N_description.sql

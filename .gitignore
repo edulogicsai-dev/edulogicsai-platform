@@ -1,6 +1,14 @@
 # Dependencies
 node_modules/
 **/node_modules/
+.venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+*.egg-info/
+**/*.egg-info/
+.pytest_cache/
+**/.pytest_cache/
 
 # Build outputs
 .next/
