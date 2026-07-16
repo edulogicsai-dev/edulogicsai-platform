@@ -1,0 +1,107 @@
+id: oonp0t
+name: core-data-schema
+source: interactive
+created: 2026-07-16
+current: core-data-schema-1
+
+phase: review
+step: reviewing
+
+progress:
+  total_items: 7
+  specs_completed: 7
+  specs_pending: 0
+  plans_completed: 7
+  plans_pending: 0
+  implemented: 7
+  reviewed: 7
+
+items:
+  - id: 01-core-data-schema
+    title: Core Data Platform — Multi-Tenant Database Schema
+    type: epic
+    location: changes/2026/07/16/core-data-schema
+    children:
+      - id: 01-tenant-foundation
+        change_id: core-data-schema-1
+        title: Tenant Foundation
+        type: feature
+        location: changes/2026/07/16/core-data-schema/changes/tenant-foundation
+        depends_on: []
+        spec_status: approved
+        plan_status: approved
+        impl_status: complete
+        review_status: approved
+        substep: null
+
+      - id: 02-student-profiles
+        change_id: core-data-schema-2
+        title: Student Profiles
+        type: feature
+        location: changes/2026/07/16/core-data-schema/changes/student-profiles
+        depends_on: [01-tenant-foundation]
+        spec_status: approved
+        plan_status: approved
+        impl_status: complete
+        review_status: approved
+        substep: null
+
+      - id: 03-agent-sessions
+        change_id: core-data-schema-3
+        title: Agent Sessions
+        type: feature
+        location: changes/2026/07/16/core-data-schema/changes/agent-sessions
+        depends_on: [01-tenant-foundation, 02-student-profiles]
+        spec_status: approved
+        plan_status: approved
+        impl_status: complete
+        review_status: approved
+        substep: null
+
+      - id: 04-episodic-memory
+        change_id: core-data-schema-4
+        title: Episodic Memory
+        type: feature
+        location: changes/2026/07/16/core-data-schema/changes/episodic-memory
+        depends_on: [01-tenant-foundation, 03-agent-sessions]
+        spec_status: approved
+        plan_status: approved
+        impl_status: complete
+        review_status: approved
+        substep: null
+
+      - id: 05-domain-content
+        change_id: core-data-schema-5
+        title: Domain Content Store
+        type: feature
+        location: changes/2026/07/16/core-data-schema/changes/domain-content
+        depends_on: [01-tenant-foundation]
+        spec_status: approved
+        plan_status: approved
+        impl_status: complete
+        review_status: approved
+        substep: null
+
+      - id: 06-concept-mastery
+        change_id: core-data-schema-6
+        title: Concept Mastery
+        type: feature
+        location: changes/2026/07/16/core-data-schema/changes/concept-mastery
+        depends_on: [01-tenant-foundation, 02-student-profiles]
+        spec_status: approved
+        plan_status: approved
+        impl_status: complete
+        review_status: approved
+        substep: null
+
+      - id: 07-prompt-registry
+        change_id: core-data-schema-7
+        title: Prompt Registry
+        type: feature
+        location: changes/2026/07/16/core-data-schema/changes/prompt-registry
+        depends_on: [01-tenant-foundation]
+        spec_status: approved
+        plan_status: approved
+        impl_status: complete
+        review_status: approved
+        substep: null

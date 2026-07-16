@@ -81,5 +81,5 @@ interface DomainConfig {
 - Agent contract types:       packages/core/src/agent/*.ts (shared across all domains, not per-domain)
 - Prompt files:   domains/{domain}/prompts/{agent}_v1.md
 - Spec files:     specs/{area}/{NAME}-SPEC.md
-- DB migrations:  supabase/migrations/00N_description.sql
+- DB migrations:  apps/web/supabase/migrations/<timestamp>_description.sql (Supabase CLI convention, e.g. `supabase migration new <name>` — matches the existing 20230530034630_init.sql; NOT a root-level supabase/ dir, and NOT 00N-prefixed)
 - Packages:       @mcatai/core, @mcatai/ui, @mcatai/memory, @mcatai/eval
