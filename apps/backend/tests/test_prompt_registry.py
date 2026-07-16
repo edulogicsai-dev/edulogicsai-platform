@@ -13,3 +13,9 @@ def test_file_prompt_registry_client_reads_mira_prompt() -> None:
     client = FilePromptRegistryClient(domain="mcat")
     prompt = client.get_prompt("mira", "v1")
     assert "MIRA" in prompt
+
+
+def test_file_prompt_registry_client_reads_quinn_prompt() -> None:
+    client = FilePromptRegistryClient(domain="mcat")
+    prompt = client.get_prompt("quinn", "v1")
+    assert "QUINN" in prompt
