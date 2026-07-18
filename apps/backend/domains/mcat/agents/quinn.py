@@ -10,11 +10,12 @@ established by ARIA/MIRA (changes/2026/07/10/aria-agent/,
 changes/2026/07/15/mira-agent/) in the absence of a persistence layer.
 """
 
+import datetime
 import json
 from dataclasses import dataclass
 from typing import AsyncIterator, List, Optional, Protocol
 
-from domains._contracts.agent_io import AgentInput, AgentOutput, ContentChunk, EpisodicMemory
+from domains._contracts.agent_io import AgentInput, AgentOutput, ContentChunk, EpisodicMemory, MasteryDelta
 from domains._contracts.base_agent import BaseAgent
 from domains.mcat.agents.aria import (
     MEDICAL_ADVICE_PATTERNS,  # reused as-is
@@ -24,6 +25,21 @@ from domains.mcat.agents.aria import (
 from prompt_registry.client import FilePromptRegistryClient, PromptRegistryClient
 
 PENDING_MARKER_PREFIX = "quinn_pending: "
+DEFAULT_EASE_FACTOR = 2.5
+MAX_EASE_FACTOR = 3.0
+MIN_EASE_FACTOR = 1.3
+
+
+def _adjust_ease_factor(previous: float, correct: bool) -> float:
+    """
+    Same simplified SM-2-style rule as ConceptMasteryRepository.record_attempt
+    (changes/2026/07/17/nexus-orchestration/changes/database-wiring/) --
+    computed here too so QUINN can embed it in mastery_update immediately,
+    without waiting on a database round-trip. See that change's SPEC.md FR4.
+    """
+    if correct:
+        return min(previous + 0.1, MAX_EASE_FACTOR)
+    return max(previous - 0.2, MIN_EASE_FACTOR)
 
 
 @dataclass
@@ -172,6 +188,7 @@ class Quinn(BaseAgent):
             "consecutive_wrong": 0,
             "questions_completed": 0,
             "correct_count": 0,
+            "ease_factor": DEFAULT_EASE_FACTOR,
         }
         yield AgentOutput(
             response=question.prompt_text,
@@ -193,6 +210,26 @@ class Quinn(BaseAgent):
         questions_completed = pending["questions_completed"] + 1
         correct_count = pending["correct_count"] + (1 if is_correct else 0)
         accuracy = correct_count / questions_completed if questions_completed else 0.0
+
+        previous_ease_factor = float(pending.get("ease_factor", DEFAULT_EASE_FACTOR))
+        new_ease_factor = _adjust_ease_factor(previous_ease_factor, is_correct)
+        # MasteryDelta.previousStability/newStability are repurposed to carry
+        # ease-factor values, not true FSRS stability -- see SPEC.md FR4 and
+        # core-data-schema's concept-mastery SPEC.md for the underlying
+        # discrepancy this continues rather than hides.
+        # concept_mastery's concept_id column requires the domain::slug
+        # convention (specs/domain/glossary.md; enforced by a DB check
+        # constraint -- discovered when this was first wired to the real
+        # table). QUINN's own internal concept tracking (pending["concept"],
+        # used in student-facing response text) deliberately stays
+        # unprefixed; the domain prefix is added only here, at the DB-write
+        # boundary, so students never see "mcat::" in a response.
+        mastery_update = MasteryDelta(
+            conceptId=f"{input.tenant_id}::{pending['concept']}",
+            previousStability=previous_ease_factor,
+            newStability=new_ease_factor,
+            reviewedAt=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        )
 
         verdict = "Correct!" if is_correct else "Not quite."
         explanation = (
@@ -217,6 +254,7 @@ class Quinn(BaseAgent):
             "consecutive_wrong": consecutive_wrong,
             "questions_completed": questions_completed,
             "correct_count": correct_count,
+            "ease_factor": new_ease_factor,
         }
 
         if suggested_handoff is not None:
@@ -225,7 +263,7 @@ class Quinn(BaseAgent):
                 agent_id=self.id,
                 cited_chunks=[],
                 suggested_handoff=suggested_handoff,
-                mastery_update=None,
+                mastery_update=mastery_update,
                 session_notes=json.dumps(streaks),
                 risk_level="low",
             )
@@ -238,7 +276,7 @@ class Quinn(BaseAgent):
             agent_id=self.id,
             cited_chunks=next_question.cited_chunk_ids,
             suggested_handoff=None,
-            mastery_update=None,
+            mastery_update=mastery_update,
             session_notes=_encode_pending_marker(next_question, streaks),
             risk_level="low",
         )

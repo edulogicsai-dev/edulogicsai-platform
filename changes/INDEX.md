@@ -1,8 +1,8 @@
 # Spec Index
 
-Last updated: 2026-07-16
+Last updated: 2026-07-17
 
-Total: 12 specs (Active: 12, Deprecated: 0, Archived: 0)
+Total: 18 specs (Active: 18, Deprecated: 0, Archived: 0)
 
 ## Active Changes
 
@@ -20,6 +20,12 @@ Total: 12 specs (Active: 12, Deprecated: 0, Archived: 0)
 | ↳ Domain Content Store | feature | [2026/07/16/core-data-schema/changes/domain-content/SPEC.md](2026/07/16/core-data-schema/changes/domain-content/SPEC.md) | platform | TBD | 2026-07-16 |
 | ↳ Concept Mastery | feature | [2026/07/16/core-data-schema/changes/concept-mastery/SPEC.md](2026/07/16/core-data-schema/changes/concept-mastery/SPEC.md) | platform | TBD | 2026-07-16 |
 | ↳ Prompt Registry | feature | [2026/07/16/core-data-schema/changes/prompt-registry/SPEC.md](2026/07/16/core-data-schema/changes/prompt-registry/SPEC.md) | platform | TBD | 2026-07-16 |
+| NEXUS Orchestration Layer | epic | [2026/07/17/nexus-orchestration/SPEC.md](2026/07/17/nexus-orchestration/SPEC.md) | mcat | TBD | 2026-07-17 |
+| ↳ LiteLLM Gateway | feature | [2026/07/17/nexus-orchestration/changes/litellm-gateway/SPEC.md](2026/07/17/nexus-orchestration/changes/litellm-gateway/SPEC.md) | mcat | TBD | 2026-07-17 |
+| ↳ NEXUS Supervisor | feature | [2026/07/17/nexus-orchestration/changes/nexus-supervisor/SPEC.md](2026/07/17/nexus-orchestration/changes/nexus-supervisor/SPEC.md) | mcat | TBD | 2026-07-17 |
+| ↳ LangGraph State Machine | feature | [2026/07/17/nexus-orchestration/changes/langgraph-state-machine/SPEC.md](2026/07/17/nexus-orchestration/changes/langgraph-state-machine/SPEC.md) | mcat | TBD | 2026-07-17 |
+| ↳ Database Wiring | feature | [2026/07/17/nexus-orchestration/changes/database-wiring/SPEC.md](2026/07/17/nexus-orchestration/changes/database-wiring/SPEC.md) | mcat | TBD | 2026-07-17 |
+| ↳ SSE Chat Endpoint | feature | [2026/07/17/nexus-orchestration/changes/sse-endpoint/SPEC.md](2026/07/17/nexus-orchestration/changes/sse-endpoint/SPEC.md) | mcat | TBD | 2026-07-17 |
 
 ## Deprecated
 

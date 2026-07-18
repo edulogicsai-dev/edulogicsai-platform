@@ -6,21 +6,25 @@ dependencies = [
   "fastapi>=0.111",
   "uvicorn>=0.30",
   "pydantic>=2.7",
+  "httpx>=0.27",
+  "pyyaml>=6.0",
+  "langgraph>=0.2",
+  "asyncpg>=0.29",
+  "PyJWT>=2.8",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest>=8.2",
   "pytest-asyncio>=0.23",
-  "httpx>=0.27",
 ]
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["domains", "domains._contracts", "domains.mcat", "domains.mcat.agents", "prompt_registry"]
+[tool.setuptools.packages.find]
+include = ["domains*", "prompt_registry*", "llm_gateway*", "nexus*", "db*", "auth*", "api*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

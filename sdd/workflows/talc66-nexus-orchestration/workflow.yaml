@@ -1,0 +1,83 @@
+id: talc66
+name: nexus-orchestration
+source: interactive
+created: 2026-07-17
+current: nexus-orchestration-1
+
+phase: review
+step: reviewing
+
+progress:
+  total_items: 5
+  specs_completed: 5
+  specs_pending: 0
+  plans_completed: 5
+  plans_pending: 0
+  implemented: 5
+  reviewed: 0
+
+items:
+  - id: 01-nexus-orchestration
+    title: NEXUS Orchestration Layer
+    type: epic
+    location: changes/2026/07/17/nexus-orchestration
+    children:
+      - id: 01-litellm-gateway
+        change_id: nexus-orchestration-1
+        title: LiteLLM Gateway
+        type: feature
+        location: changes/2026/07/17/nexus-orchestration/changes/litellm-gateway
+        depends_on: []
+        spec_status: approved
+        plan_status: approved
+        impl_status: complete
+        review_status: approved
+        substep: null
+
+      - id: 02-nexus-supervisor
+        change_id: nexus-orchestration-2
+        title: NEXUS Supervisor
+        type: feature
+        location: changes/2026/07/17/nexus-orchestration/changes/nexus-supervisor
+        depends_on: [01-litellm-gateway]
+        spec_status: approved
+        plan_status: approved
+        impl_status: complete
+        review_status: approved
+        substep: null
+
+      - id: 03-langgraph-state-machine
+        change_id: nexus-orchestration-3
+        title: LangGraph State Machine
+        type: feature
+        location: changes/2026/07/17/nexus-orchestration/changes/langgraph-state-machine
+        depends_on: [02-nexus-supervisor]
+        spec_status: approved
+        plan_status: approved
+        impl_status: complete
+        review_status: approved
+        substep: null
+
+      - id: 04-database-wiring
+        change_id: nexus-orchestration-4
+        title: Database Wiring
+        type: feature
+        location: changes/2026/07/17/nexus-orchestration/changes/database-wiring
+        depends_on: [02-nexus-supervisor]
+        spec_status: approved
+        plan_status: approved
+        impl_status: complete
+        review_status: approved
+        substep: null
+
+      - id: 05-sse-endpoint
+        change_id: nexus-orchestration-5
+        title: SSE Chat Endpoint
+        type: feature
+        location: changes/2026/07/17/nexus-orchestration/changes/sse-endpoint
+        depends_on: [03-langgraph-state-machine, 04-database-wiring]
+        spec_status: approved
+        plan_status: approved
+        impl_status: complete
+        review_status: approved
+        substep: null

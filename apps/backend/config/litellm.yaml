@@ -1,0 +1,25 @@
+model_list:
+  - model_name: haiku-intent
+    litellm_params:
+      model: anthropic/claude-3-5-haiku-20241022
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: sonnet-tutor
+    litellm_params:
+      model: anthropic/claude-sonnet-4-20250514
+      api_key: os.environ/ANTHROPIC_API_KEY
+      cache_control_injection_points:
+        - location: message
+          role: system
+
+  # Stub for future EVAL agent batch jobs (50% cost discount) -- not invoked
+  # by any code in this change. See changes/2026/07/17/nexus-orchestration/
+  # changes/litellm-gateway/SPEC.md Out of Scope.
+  - model_name: sonnet-eval-batch
+    litellm_params:
+      model: anthropic/claude-sonnet-4-20250514
+      api_key: os.environ/ANTHROPIC_API_KEY
+      mode: batch
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

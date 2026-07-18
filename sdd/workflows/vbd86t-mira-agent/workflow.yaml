@@ -28,6 +28,6 @@ items:
     spec_status: approved
     plan_status: approved
     impl_status: complete
-    review_status: ready_for_review
+    review_status: approved
 
     substep: null
