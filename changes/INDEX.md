@@ -1,8 +1,8 @@
 # Spec Index
 
-Last updated: 2026-07-17
+Last updated: 2026-07-20
 
-Total: 18 specs (Active: 18, Deprecated: 0, Archived: 0)
+Total: 23 specs (Active: 23, Deprecated: 0, Archived: 0)
 
 ## Active Changes
 
@@ -26,6 +26,11 @@ Total: 18 specs (Active: 18, Deprecated: 0, Archived: 0)
 | ↳ LangGraph State Machine | feature | [2026/07/17/nexus-orchestration/changes/langgraph-state-machine/SPEC.md](2026/07/17/nexus-orchestration/changes/langgraph-state-machine/SPEC.md) | mcat | TBD | 2026-07-17 |
 | ↳ Database Wiring | feature | [2026/07/17/nexus-orchestration/changes/database-wiring/SPEC.md](2026/07/17/nexus-orchestration/changes/database-wiring/SPEC.md) | mcat | TBD | 2026-07-17 |
 | ↳ SSE Chat Endpoint | feature | [2026/07/17/nexus-orchestration/changes/sse-endpoint/SPEC.md](2026/07/17/nexus-orchestration/changes/sse-endpoint/SPEC.md) | mcat | TBD | 2026-07-17 |
+| Web Chat Integration | epic | [2026/07/20/web-chat-integration/SPEC.md](2026/07/20/web-chat-integration/SPEC.md) | mcat | TBD | 2026-07-20 |
+| ↳ Auth Flow | feature | [2026/07/20/web-chat-integration/changes/auth-flow/SPEC.md](2026/07/20/web-chat-integration/changes/auth-flow/SPEC.md) | mcat | TBD | 2026-07-20 |
+| ↳ SSE Chat Hook | feature | [2026/07/20/web-chat-integration/changes/sse-chat-hook/SPEC.md](2026/07/20/web-chat-integration/changes/sse-chat-hook/SPEC.md) | mcat | TBD | 2026-07-20 |
+| ↳ Chat UI | feature | [2026/07/20/web-chat-integration/changes/chat-ui/SPEC.md](2026/07/20/web-chat-integration/changes/chat-ui/SPEC.md) | mcat | TBD | 2026-07-20 |
+| ↳ Dashboard Layout | feature | [2026/07/20/web-chat-integration/changes/dashboard-layout/SPEC.md](2026/07/20/web-chat-integration/changes/dashboard-layout/SPEC.md) | mcat | TBD | 2026-07-20 |
 
 ## Deprecated
 

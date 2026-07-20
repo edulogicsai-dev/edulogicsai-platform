@@ -60,6 +60,10 @@ export const createClient = (request: NextRequest) => {
   return { supabase, response };
 };
 
+// FR5 (auth-flow): routes that require an authenticated session --
+// unauthenticated requests are redirected to /signin.
+const PROTECTED_PATHS = ['/dashboard', '/onboarding'];
+
 export const updateSession = async (request: NextRequest) => {
   try {
     // This `try/catch` block is only here for the interactive tutorial.
@@ -68,7 +72,16 @@ export const updateSession = async (request: NextRequest) => {
 
     // This will refresh session if expired - required for Server Components
     // https://supabase.com/docs/guides/auth/server-side/nextjs
-    await supabase.auth.getUser();
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
+
+    const isProtected = PROTECTED_PATHS.some((path) =>
+      request.nextUrl.pathname.startsWith(path)
+    );
+    if (isProtected && !user) {
+      return NextResponse.redirect(new URL('/signin', request.url));
+    }
 
     return response;
   } catch (e) {

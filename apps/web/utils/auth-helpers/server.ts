@@ -5,6 +5,18 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getURL, getErrorRedirect, getStatusRedirect } from 'utils/helpers';
 import { getAuthTypes } from 'utils/auth-helpers/settings';
+import { getStudentProfile, DOMAIN_ID } from 'utils/supabase/profile';
+
+// FR2 (auth-flow): route to /onboarding if this user has no student_profiles
+// row yet for the current tenant, /dashboard otherwise. Both signUp and
+// signInWithPassword use this instead of always redirecting to '/'.
+async function postAuthRedirect(
+  supabase: ReturnType<typeof createClient>,
+  userId: string
+): Promise<string> {
+  const profile = await getStudentProfile(supabase, userId, DOMAIN_ID);
+  return profile ? '/dashboard' : '/onboarding';
+}
 
 function isValidEmail(email: string) {
   var regex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}$/;
@@ -151,7 +163,12 @@ export async function signInWithPassword(formData: FormData) {
     );
   } else if (data.user) {
     cookieStore.set('preferredSignInView', 'password_signin', { path: '/' });
-    redirectPath = getStatusRedirect('/', 'Success!', 'You are now signed in.');
+    const destination = await postAuthRedirect(supabase, data.user.id);
+    redirectPath = getStatusRedirect(
+      destination,
+      'Success!',
+      'You are now signed in.'
+    );
   } else {
     redirectPath = getErrorRedirect(
       '/signin/password_signin',
@@ -194,7 +211,14 @@ export async function signUp(formData: FormData) {
       error.message
     );
   } else if (data.session) {
-    redirectPath = getStatusRedirect('/', 'Success!', 'You are now signed in.');
+    // Brand-new signup with an immediate session (email confirmation
+    // disabled) -- no student_profiles row can exist yet, straight to
+    // onboarding (FR1/FR2, auth-flow SPEC.md).
+    redirectPath = getStatusRedirect(
+      '/onboarding',
+      'Success!',
+      'You are now signed in.'
+    );
   } else if (
     data.user &&
     data.user.identities &&

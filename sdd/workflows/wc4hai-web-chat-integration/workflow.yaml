@@ -1,0 +1,71 @@
+id: wc4hai
+name: web-chat-integration
+source: interactive
+created: 2026-07-20
+current: web-chat-integration-4
+
+phase: review
+step: reviewing
+
+progress:
+  total_items: 4
+  specs_completed: 4
+  specs_pending: 0
+  plans_completed: 4
+  plans_pending: 0
+  implemented: 4
+  reviewed: 0
+
+items:
+  - id: 01-web-chat-integration
+    title: Web Chat Integration
+    type: epic
+    location: changes/2026/07/20/web-chat-integration
+    children:
+      - id: 01-auth-flow
+        change_id: web-chat-integration-1
+        title: Auth Flow
+        type: feature
+        location: changes/2026/07/20/web-chat-integration/changes/auth-flow
+        depends_on: []
+        spec_status: approved
+        plan_status: approved
+        impl_status: complete
+        review_status: pending
+        substep: null
+
+      - id: 02-sse-chat-hook
+        change_id: web-chat-integration-2
+        title: SSE Chat Hook
+        type: feature
+        location: changes/2026/07/20/web-chat-integration/changes/sse-chat-hook
+        depends_on: [01-auth-flow]
+        spec_status: approved
+        plan_status: approved
+        impl_status: complete
+        review_status: pending
+        substep: null
+
+      - id: 03-chat-ui
+        change_id: web-chat-integration-3
+        title: Chat UI
+        type: feature
+        location: changes/2026/07/20/web-chat-integration/changes/chat-ui
+        depends_on: [02-sse-chat-hook]
+        spec_status: approved
+        plan_status: approved
+        impl_status: complete
+        review_status: pending
+        substep: null
+
+      - id: 04-dashboard-layout
+        change_id: web-chat-integration-4
+        title: Dashboard Layout
+        type: feature
+        location: changes/2026/07/20/web-chat-integration/changes/dashboard-layout
+        depends_on: [01-auth-flow, 03-chat-ui]
+        spec_status: approved
+        plan_status: approved
+        impl_status: complete
+        review_status: pending
+        substep: null
