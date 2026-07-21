@@ -41,7 +41,7 @@ export async function createStudentProfile(
   const { error } = await supabase.from('student_profiles').insert({
     user_id: userId,
     tenant_id: tenantId,
-    test_date: testDate,
+    test_date: testDate || null,
     score_goal: scoreGoal
   });
 

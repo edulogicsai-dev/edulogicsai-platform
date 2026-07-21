@@ -2,6 +2,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 import domains.mcat.domain_config  # noqa: F401 -- self-registration
 from api.chat import create_chat_router
@@ -25,7 +26,7 @@ async def lifespan(app: FastAPI):
         domain_result = registry.resolve_domain("mcat")
         graph = build_graph(domain_result.config, registry)
         router = create_chat_router(
-            jwt_verifier=JWTVerifier(secret=jwt_secret),
+            jwt_verifier=JWTVerifier(jwks_url="https://cvxtqcebikmqaskvewlm.supabase.co/auth/v1/.well-known/jwks.json", secret=jwt_secret),
             pool=pool,
             graph=graph,
             default_entry_agent_id="aria",
@@ -35,6 +36,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="EduLogicsAI Backend", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
