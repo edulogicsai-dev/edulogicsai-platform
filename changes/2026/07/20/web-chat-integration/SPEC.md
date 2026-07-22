@@ -5,7 +5,7 @@ status: active
 domain: mcat
 issue: TBD
 created: 2026-07-20
-updated: 2026-07-20
+updated: 2026-07-22
 sdd_version: 7.3.0
 affected_components: []
 ---
@@ -21,8 +21,8 @@ Connect the Next.js web app (`apps/web`) — currently a Stripe/Supabase SaaS st
 ### Current State
 
 - `apps/web` has working email/password signup, signin, and password-reset flows (`components/ui/AuthForms/`), a Supabase browser/server client (`utils/supabase/client.ts`, `utils/supabase/server.ts`), and session-refresh middleware (`utils/supabase/middleware.ts`) — but nothing beyond `/account` (billing) as a post-login destination.
-- `student_profiles` (`apps/web/supabase/migrations/20260716000002_student_profiles.sql`) exists with RLS policies that already permit a signed-in user to `select`/`insert`/`update` their own row (`auth.uid() = user_id and tenant_id = current_tenant()`) — no backend endpoint is needed to create it (see auth-flow's Gaps & Assumptions).
-- `POST /api/chat` (`apps/backend/api/chat.py`) accepts `{message, session_id?, tenant_id}` with `Authorization: Bearer <jwt>`, 401s on invalid JWT, 403s if no `student_profiles` row exists for `(user_id, tenant_id)`, and streams `event: message` (one per agent hop, not per-token) / `event: done` / `event: error` as `text/event-stream`. In the `nexus-orchestration` dev environment this was verified against a local test JWT secret, not a real Supabase-issued token (see Cross-Cutting Concerns).
+- `student_profiles` (`apps/web/supabase/migrations/20260716000002_student_profiles.sql`, amended by `20260722000001_student_profiles_tenant_membership_rls.sql`) exists with RLS policies that already permit a signed-in user to `select`/`insert`/`update` their own row (`auth.uid() = user_id and tenant_id in (select id from tenants)` — amended 2026-07-22 from the original `tenant_id = current_tenant()`, which never actually resolved for a real browser session; see `student-profiles/SPEC.md` FR2 and `auth-flow/SPEC.md` FR3) — no backend endpoint is needed to create it (see auth-flow's Gaps & Assumptions).
+- `POST /api/chat` (`apps/backend/api/chat.py`) accepts `{message, session_id?, tenant_id}` with `Authorization: Bearer <jwt>`, 401s on invalid JWT, 403s if no `student_profiles` row exists for `(user_id, tenant_id)`, and streams `event: message` (one per agent hop, not per-token) / `event: done` / `event: error` as `text/event-stream`. JWT verification is now JWKS/ES256-based against Supabase's real signing keys (amended 2026-07-22, see Cross-Cutting Concerns and `sse-endpoint/SPEC.md` FR2) — the `nexus-orchestration` dev environment originally verified this against a local test HS256 secret, not a real Supabase-issued token.
 - No `NEXT_PUBLIC_API_URL` or `NEXT_PUBLIC_DOMAIN_ID` env vars exist yet in `apps/web`.
 - `AgentOutput` (`packages/core/src/agent/agent-output.ts`) carries `agent_id` only — no `displayName`/`emoji`/`color`. No endpoint exposes the agent roster or `DomainConfig.theme` to the frontend (`DomainConfig` is Python-side only per CLAUDE.md's monorepo structure).
 
@@ -46,10 +46,11 @@ Connect the Next.js web app (`apps/web`) — currently a Stripe/Supabase SaaS st
 
 ## Cross-Cutting Concerns
 
-- **Real JWT verification is a deploy-time config concern, not a code change:** `apps/backend`'s `JWTVerifier` (see `nexus-orchestration`) was built and tested against a local test secret — no real Supabase credentials existed in that environment. For this epic's flows to work against an actually-deployed backend, `apps/backend`'s `JWT_SECRET` env var must be set to the target Supabase project's JWT signing secret (Project Settings → API → JWT Secret, HS256). No child change in this epic modifies backend code to make this true; it's an environment/deployment prerequisite, called out here so it isn't silently assumed.
+- **Real JWT verification — superseded 2026-07-22, kept for history:** original text: "a deploy-time config concern, not a code change: `apps/backend`'s `JWTVerifier` (see `nexus-orchestration`) was built and tested against a local test secret — no real Supabase credentials existed in that environment. For this epic's flows to work against an actually-deployed backend, `apps/backend`'s `JWT_SECRET` env var must be set to the target Supabase project's JWT signing secret (Project Settings → API → JWT Secret, HS256). No child change in this epic modifies backend code to make this true." That assumption didn't hold: Supabase had rotated this project's signing keys from HS256 to ECC (ES256), which a same-shape secret swap can't verify regardless of the value — a real code change was needed, not just config. `JWTVerifier` now verifies via `PyJWKClient` against Supabase's real `/.well-known/jwks.json`, accepting both `ES256` and `HS256`. See `sse-endpoint/SPEC.md` FR2's amendment for the full account; `JWT_SECRET` remains as a fallback parameter, not the primary verification path.
 - **No agent-metadata endpoint exists:** `AgentOutput.agent_id` is the only identifier the backend sends — no `displayName`, emoji, or color. chat-ui and dashboard-layout both need per-agent display metadata (border color via `--agent-{id}`, name, icon). Both changes import one shared file, `apps/web/lib/agent-registry.ts` (`aria`/`mira`/`quinn` → name/emoji; `dashboard-layout`'s theme constant adds the color), added by `chat-ui` and consumed as-is by `dashboard-layout` — not two independently hardcoded lists. Out of scope: a `GET /api/agents` roster endpoint that would let this be domain-config-driven instead of hardcoded.
 - **Domain theming is hardcoded, not `DomainConfig`-driven:** `DomainConfig.theme` (`packages/core/src/domain/domain-config.ts`) is a type only — no TypeScript-side `mcat` `DomainConfig` object is instantiated anywhere (CLAUDE.md: `domains/mcat/` is Python-side). `dashboard-layout` defines its own local `mcat` theme CSS var object. `NEXT_PUBLIC_DOMAIN_ID='mcat'` selects it but there is currently only one theme to select — multi-domain theming from a real `DomainConfig` source is future work (GREai/DATai), not this epic.
 - **SSE over `fetch`, not `EventSource`:** the browser's native `EventSource` API cannot send `POST` bodies or custom `Authorization` headers, both of which `/api/chat` requires. `sse-chat-hook` reads and parses the stream manually via `fetch()` + `ReadableStream`. This is established once in that child and consumed as-is by chat-ui.
+- **CORS (Added 2026-07-22):** `sse-chat-hook`'s `fetch()` calls are the first real cross-origin request `/api/chat` has ever received (`apps/web`'s dev server origin vs. `apps/backend`'s) — `nexus-orchestration`'s original SSE endpoint work was only ever called from `httpx.AsyncClient` in-process (same-origin by construction, no browser CORS preflight involved). `apps/backend/main.py` now registers `CORSMiddleware` allowing `http://localhost:3000`/`:3001`. No production origin is configured yet — see `sse-endpoint/SPEC.md` FR6a.
 
 ## Domain Updates
 
@@ -59,7 +60,7 @@ No new terms — `Handoff`, `AgentOutput`, `DomainConfig`, `tenant_id` are all p
 
 ## Out of Scope
 
-- Real Supabase JWT secret provisioning in any deployed backend environment (see Cross-Cutting Concerns) — config, not code.
+- ~~Real Supabase JWT secret provisioning in any deployed backend environment~~ — done 2026-07-22, and turned out to require a real code change (JWKS/ES256 support), not just config as originally assumed (see Cross-Cutting Concerns).
 - A `GET /api/agents` roster/domain-config endpoint — agent display metadata is hardcoded client-side for this epic.
 - Token-level incremental rendering — the backend streams one event per agent hop (`nexus-orchestration` decision), not per-token; the chat UI's "streaming indicator" reflects that granularity, not a typewriter effect.
 - OAuth sign-in (GitHub, etc.) — `OauthSignIn.tsx` exists in the starter but is disabled per `775145a fix: disable GitHub OAuth in Supabase config`; this epic uses email/password only.

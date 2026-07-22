@@ -121,7 +121,7 @@ apps/web/
 
 | Component | Reason |
 |-----------|--------|
-| `auth-flow` | Student profile data (name, test_date, score_goal, current_score), placeholder route this change replaces |
+| `auth-flow` | Student profile data (`getStudentProfile()`: test_date, score_goal, current_score; `getDisplayName()`: name, added in that spec's FR6, 2026-07-22), placeholder route this change replaces |
 | `chat-ui` | `ChatContainer`; also the change that first adds the shared `lib/agent-registry.ts` this change imports |
 
 ### External Dependencies

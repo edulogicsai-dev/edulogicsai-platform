@@ -180,3 +180,93 @@ async def test_never_minimizes_pushes_content_or_promises_outcomes():
     assert "it's not a big deal" not in lowered
     assert "just relax" not in lowered
     assert "you'll feel better" not in lowered
+
+
+# --- Deterministic distress guard (FR4 amendment, 2026-07-22) -----------------
+# Mirrors ARIA's medical-advice guard tests: the guard must override the
+# model's own judgment when triggered, not just happen to agree with it.
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "I want to kill myself",
+        "sometimes I think about ending it all",
+        "I've been having suicidal thoughts",
+        "I want to hurt myself",
+        "I just want to die",
+        "I don't want to be alive anymore",
+        "I give up on everything",
+        "there's no point anymore",
+        "I can't do this anymore",
+        "I'm worthless",
+        "I'm a failure",
+    ],
+)
+@pytest.mark.asyncio
+async def test_distress_guard_forces_high_risk_even_when_model_says_low(message):
+    # The guard must win regardless of the model's own (wrong, in this test)
+    # classification -- this is the whole point of a deterministic floor.
+    output = await respond_once(
+        make_input(message=message),
+        {
+            "response": "Let's take this one step at a time.",
+            "recovered": False,
+            "risk_level": "low",
+            "session_notes": "note",
+        },
+    )
+    assert output.risk_level == "high"
+
+
+@pytest.mark.asyncio
+async def test_distress_guard_also_suppresses_a_simultaneous_recovery_report():
+    # Same safety-over-recovery priority as the model-driven path (AC6), but
+    # here the "high" comes from the guard, not the model -- recovered must
+    # still be forced null.
+    output = await respond_once(
+        make_input(message="I'm worthless and nothing matters"),
+        {
+            "response": "I hear you.",
+            "recovered": True,
+            "risk_level": "low",
+            "session_notes": "note",
+        },
+    )
+    assert output.risk_level == "high"
+    assert output.suggested_handoff is None
+
+
+@pytest.mark.asyncio
+async def test_model_can_still_independently_report_high_risk_guard_misses():
+    # The guard is a floor, not a ceiling or a replacement -- a message with
+    # none of the guard's keywords must still be able to reach risk_level
+    # 'high' via the model's own subtler judgment (AC4's existing scenario,
+    # re-asserted here to make the "floor, not replacement" relationship
+    # explicit against the new guard).
+    output = await respond_once(
+        make_input(message="Nothing feels like it matters to me right now."),
+        {
+            "response": "What you're carrying sounds like more than I'm equipped to help with alone.",
+            "recovered": False,
+            "risk_level": "high",
+            "session_notes": "Subtler distress signal caught by the model, not the keyword guard.",
+        },
+    )
+    assert output.risk_level == "high"
+
+
+@pytest.mark.asyncio
+async def test_distress_guard_does_not_fire_on_ordinary_frustration():
+    # Regression check: the guard is high-precision by design -- ordinary
+    # academic frustration must not trip it.
+    output = await respond_once(
+        make_input(message="I don't get enzyme kinetics at all, this is so frustrating."),
+        {
+            "response": "This is genuinely hard.",
+            "recovered": False,
+            "risk_level": "low",
+            "session_notes": "note",
+        },
+    )
+    assert output.risk_level == "low"

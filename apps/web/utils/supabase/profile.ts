@@ -34,8 +34,9 @@ export async function createStudentProfile(
 ): Promise<void> {
   const { userId, testDate, scoreGoal, tenantId = DOMAIN_ID } = params;
 
-  // Relies on student_profiles' existing RLS insert policy
-  // (auth.uid() = user_id and tenant_id = current_tenant()) -- must run
+  // Relies on student_profiles' RLS insert policy
+  // (auth.uid() = user_id and tenant_id in (select id from tenants), as of
+  // 20260722000001_student_profiles_tenant_membership_rls.sql) -- must run
   // under the authenticated session, not the anon key alone. See
   // changes/2026/07/20/web-chat-integration/changes/auth-flow/SPEC.md FR3.
   const { error } = await supabase.from('student_profiles').insert({
@@ -61,9 +62,9 @@ export async function getAccessToken(
 
 // dashboard-layout (web-chat-integration-4): mirrors apps/backend's
 // StudentProfileRepository.load_profile fallback ("Student" when
-// full_name is unset) -- the email/password signup form never collects a
-// name, so users.full_name is null for every account created via this
-// epic's auth-flow.
+// full_name is unset). Signup.tsx collects full_name as of 2026-07-22
+// (auth-flow SPEC.md FR1 amendment) -- this fallback now only fires for
+// pre-existing accounts or a bypassed client-side required field.
 export async function getDisplayName(
   supabase: SupabaseClient<Database>,
   userId: string

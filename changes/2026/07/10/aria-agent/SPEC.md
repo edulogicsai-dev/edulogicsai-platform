@@ -5,7 +5,7 @@ status: active
 domain: mcat
 issue: TBD
 created: 2026-07-10
-updated: 2026-07-10
+updated: 2026-07-22
 sdd_version: 7.3.0
 affected_components: []
 ---
@@ -88,13 +88,17 @@ ARIA is the anchor tutor students interact with most: a warm, Socratic guide acr
 **Description:** ARIA shall set `AgentOutput.suggested_handoff` based on frustration and readiness signals.
 
 **Behavior:**
-- If a frustration estimate over the last 3 messages in `session_history` exceeds `0.6`, `suggested_handoff` shall be `'mira'`.
+- If frustration is detected, `suggested_handoff` shall be `'mira'`.
 - If the student has completed 4 or more consecutive successful turns (tracked via a structured marker ARIA writes into `session_notes` each turn and reads back from `episodic_context` on the next), `suggested_handoff` shall be `'quinn'`.
 - If neither condition holds, `suggested_handoff` shall be `null`.
-- Frustration estimation and "successful turn" detection use an interim heuristic (keyword/pattern-based), exposed behind an injectable interface (`FrustrationEstimator`, `TurnOutcomeClassifier` protocols) so a future ML-based implementation (e.g. the SentimentTool referenced in `specs/architecture/overview.md`) can be substituted without changing `aria.py`'s handoff logic.
+- Priority: frustration wins over readiness if both would otherwise apply in the same turn (matches `quinn-agent`'s equivalent priority rule).
+
+**Amended 2026-07-22 — hybrid detection, not both heuristic:** as originally drafted here, both frustration and "successful turn" detection were keyword heuristics behind swappable protocols (`FrustrationEstimator`, `TurnOutcomeClassifier`). As of `apps/backend/domains/mcat/agents/aria.py` wiring real Claude Sonnet calls (via `LiteLLMGatewayClient`, model alias `sonnet-tutor`), the two signals split:
+- **Frustration** is now the model's own judgment, returned as a `frustration_detected` boolean field in the same structured JSON completion that produces the turn's `response` text (see Technical Design's Required Response Format). `FrustrationEstimator`/`KeywordFrustrationEstimator` were removed — there's no keyword list left in `aria.py`. This directly reflects "the LLM's understanding of the message," not a lexical marker match.
+- **"Successful turn" / readiness** stays a deterministic heuristic — `TurnOutcomeClassifier`/`KeywordTurnOutcomeClassifier` are unchanged. This one wasn't moved to the LLM: the streak it drives (`consecutive_successful_turns`) is real cross-turn state accumulated in `session_notes`/`episodic_context`, not a per-turn judgment call, and keeping it deterministic keeps that counter exactly reproducible.
 
 **Constraints:**
-- Frustration/readiness detection logic must be deterministic and unit-testable (no live LLM call required to test handoff behavior).
+- Readiness (streak) detection remains deterministic and unit-testable with no live LLM call. Frustration detection is no longer independently unit-testable without a mocked LLM response — tests inject a fake `LiteLLMGatewayClient` that returns a canned `frustration_detected` value (see `tests/test_aria.py`), the same pattern already established for `nexus/intent_classifier.py`'s `LiteLLMIntentClassifier`.
 
 ### FR5: Prohibited Behaviors / Safety Guardrails
 
@@ -108,6 +112,7 @@ ARIA is the anchor tutor students interact with most: a warm, Socratic guide acr
 
 **Constraints:**
 - The medical-advice refusal check runs independently of the LLM call (a guard checked against `message` before/around generation), so it cannot be bypassed by prompt injection alone — full jailbreak-resistance is out of scope; this is a first-layer guard, not the only one.
+- **Confirmed unchanged 2026-07-22:** now that `respond()` calls a real LLM (FR4 amendment), this guard still runs as plain Python regex against `message` before the LLM call, and its `risk_level = 'high'` always wins over whatever `risk_level` the model itself reports in that turn's JSON completion — a hard safety boundary was deliberately kept off the model's own judgment, unlike frustration detection.
 
 ### FR6: Prompt Fetching Abstraction
 
@@ -127,7 +132,7 @@ ARIA is the anchor tutor students interact with most: a warm, Socratic guide acr
 |-------------|--------|-------------|
 | Backend boots | `uvicorn main:app` starts without error, `GET /health` returns 200 | Manual/CI smoke test |
 | Contract shape parity | Pydantic `AgentInput`/`AgentOutput` field sets match documented TypeScript reference | Automated test (FR2) |
-| Handoff logic determinism | Same `session_history` input always yields same `suggested_handoff` | Unit tests |
+| Handoff logic determinism | Same `session_history` input always yields same `suggested_handoff` — **amended 2026-07-22: true for the readiness/`quinn` path only; the frustration/`mira` path now depends on a live model's judgment, which isn't guaranteed deterministic across calls** | Unit tests (readiness path); mocked-LLM tests (frustration path) |
 | Test coverage | All FR3–FR5 behaviors have at least one passing test | pytest suite |
 
 ## Technical Design
@@ -165,7 +170,7 @@ domains/mcat/prompts/aria_v1.md      # ARIA's system prompt (repo root, per CLAU
 
 **Diagnostic-opening check:** For the concept(s) implied by `message`/`retrieved_chunks`, check `student_profile`/`episodic_context` for a prior `MasteryDelta` on that concept. If none exists, the response must open with a question, not an explanation.
 
-**Frustration estimate (interim heuristic):** Given the last 3 `Message`s with `role == 'user'`, score simple lexical frustration markers (e.g. repeated punctuation, explicit frustration phrases) into a 0–1 estimate. This is a placeholder — see FR4 constraints and Out of Scope.
+**Frustration detection (amended 2026-07-22):** originally a lexical-marker score over the last 3 user messages (this paragraph's prior text, kept in git history). Now a boolean `frustration_detected` field parsed from the same structured JSON completion `respond()` gets back from `sonnet-tutor` for the turn's actual response text — one LLM call produces both, not two. See FR4's amendment and `llm_support.py`'s `complete_json` helper (shared with MIRA/QUINN) for the parsing/JSON-shape plumbing.
 
 **Consecutive-successful-turns tracking:** ARIA writes a structured marker into `session_notes` each turn (e.g. `consecutive_successful_turns: N`). On the next turn, it reads the most recent such marker back from `episodic_context` to know the current streak, and increments or resets it based on a turn-outcome heuristic (placeholder — see FR4).
 
@@ -173,6 +178,21 @@ domains/mcat/prompts/aria_v1.md      # ARIA's system prompt (repo root, per CLAU
 - Empty `session_history` (first-ever turn): frustration estimate and successful-turn streak both default to 0 — no handoff triggered on turn 1.
 - `retrieved_chunks` empty: ARIA must not fabricate `cited_chunks`; it explains from general knowledge and `cited_chunks` is an empty list (not omitted).
 - `message` contains both a medical-advice request and an in-scope MCAT question: the medical portion is declined and `risk_level = 'high'`; the in-scope portion may still be answered — the two aren't mutually exclusive within one turn.
+
+### LLM Response Contract (Added 2026-07-22)
+
+`respond()`'s system prompt is `domains/mcat/prompts/aria_v1.md`'s content (FR6) plus an appended, code-owned JSON-format instruction (not part of the authored prompt file itself) requiring the model to return exactly:
+
+```json
+{
+  "response": "<tutoring message>",
+  "cited_chunks": ["<chunk_id>", "..."],
+  "frustration_detected": true,
+  "risk_level": "low"
+}
+```
+
+`cited_chunks` is filtered against `retrieved_chunks`' actual ids before reaching `AgentOutput` — a hallucinated chunk id in the model's JSON is dropped, never surfaced (`llm_support.py`'s `valid_cited_chunks`). A non-JSON or malformed completion raises `LLMResponseParseError`, left to propagate — `sse-endpoint`'s existing SSE error handling turns it into a graceful `event: error`, so no new swallowing/fallback logic was added in `aria.py` itself.
 
 ## API Contract
 
@@ -218,7 +238,7 @@ domains/mcat/prompts/aria_v1.md      # ARIA's system prompt (repo root, per CLAU
 - [ ] **AC2:** Given the documented reference field list for `AgentInput`/`AgentOutput`, when the contract-parity test runs, then the Pydantic models' fields match it exactly.
 - [ ] **AC3:** Given a student with no prior `MasteryDelta` for a concept, when ARIA responds to a message introducing that concept, then the response opens with a diagnostic question before any explanation.
 - [ ] **AC4:** Given `retrieved_chunks` containing chunks ARIA draws on in its response, when ARIA responds, then `AgentOutput.cited_chunks` is non-empty and references chunk ids from `retrieved_chunks`.
-- [ ] **AC5:** Given the last 3 user messages score above the frustration threshold, when ARIA responds, then `AgentOutput.suggested_handoff == 'mira'`.
+- [ ] **AC5:** Given the model's structured response reports `frustration_detected: true` (amended 2026-07-22 — originally "the last 3 user messages score above the frustration threshold"; verified in tests via a mocked LLM completion, not a live model call), when ARIA responds, then `AgentOutput.suggested_handoff == 'mira'`.
 - [ ] **AC6:** Given 4+ consecutive successful turns tracked via `session_notes`/`episodic_context`, when ARIA responds, then `AgentOutput.suggested_handoff == 'quinn'`.
 - [ ] **AC7:** Given a message requesting medical diagnosis/advice, when ARIA responds, then the medical request is declined and `AgentOutput.risk_level == 'high'`.
 - [ ] **AC8:** Given any response, when its content is inspected, then it never contains an MCAT score guarantee, is never an answer without explanation, and never skips the diagnostic opening for a new concept (FR3/FR5).
@@ -316,7 +336,7 @@ specs/
 
 - Assumes Python 3.11+ and `pip` are available in the target environment (Railway, per `CLAUDE.md`); no assumption about `poetry`/`uv` — plain `pyproject.toml` + `pip install -e .`.
 - Assumes `AgentInput.retrieved_chunks` arrives pre-populated (RAG retrieval already happened upstream, per `specs/architecture/overview.md`'s data flow) — ARIA does not perform retrieval itself.
-- Assumes "successful turn" and "frustration" are approximated by heuristics for now, not a production ML model.
+- Assumes "successful turn" and "frustration" are approximated by heuristics for now, not a production ML model. **Amended 2026-07-22:** true for "successful turn" only — frustration is now the LLM's own judgment (FR4 amendment), not a heuristic, though it's also not the dedicated SentimentTool referenced in `specs/architecture/overview.md` (no separate sentiment-analysis service exists; the same completion that generates ARIA's response also reports frustration).
 - Discovered during implementation: `StudentProfile` has no per-concept mastery field, so FR3's "mastery level from `student_profile`" and "prior `MasteryDelta`" language couldn't be implemented literally — both "concept previously assessed" and "explanation depth" are approximated via `episodic_context` mention counts instead (see FR3, updated to match).
 
 ### Cross-References
@@ -366,7 +386,7 @@ No changes — ARIA, BaseAgent, AgentInput, AgentOutput, Handoff are all pre-exi
 | agent_io.py | Field-set parity check against documented TypeScript reference | Matches exactly (AC2) |
 | aria.py | Respond to a new (unassessed) concept | Opens with a diagnostic question (AC3) |
 | aria.py | Respond with non-empty `retrieved_chunks` actually used | `cited_chunks` non-empty (AC4) |
-| aria.py | Last 3 messages score above frustration threshold | `suggested_handoff == 'mira'` (AC5) |
+| aria.py | Mocked `LiteLLMGatewayClient` returns `frustration_detected: true` (amended 2026-07-22; was "last 3 messages score above frustration threshold") | `suggested_handoff == 'mira'` (AC5) |
 | aria.py | 4+ consecutive successful turns tracked | `suggested_handoff == 'quinn'` (AC6) |
 | aria.py | Message requests medical advice | Declined, `risk_level == 'high'` (AC7) |
 | aria.py | Any response | No score guarantee, no unexplained answer, no skipped diagnostic opening (AC8) |
@@ -406,6 +426,8 @@ No changes — ARIA, BaseAgent, AgentInput, AgentOutput, Handoff are all pre-exi
 |---------|--------------|----------|
 | N/A | N/A | No external service calls in this change (no live LLM, no Langfuse) |
 
+**Amended 2026-07-22:** no longer accurate as the current state — `aria.py` now calls Claude Sonnet via `LiteLLMGatewayClient` (model alias `sonnet-tutor`, see `changes/2026/07/17/nexus-orchestration/changes/litellm-gateway/`). Kept above as the historical record for this change's original scope; the follow-on LLM-wiring work has no dedicated SPEC.md of its own (delivered directly against this and `mira-agent`/`quinn-agent`'s existing specs — see each one's 2026-07-22 amendments).
+
 ## Migration / Rollback
 
 ### Migration Steps
@@ -436,7 +458,7 @@ No changes — ARIA, BaseAgent, AgentInput, AgentOutput, Handoff are all pre-exi
 ## Open Questions
 
 - [ ] When should `domains/mcat/domain.config.ts` be created — after N more agents exist, or as soon as a second agent (e.g. MIRA, since ARIA's handoff rule already references it) is built?
-- [ ] Should the frustration/readiness heuristics in FR4 be replaced by a real SentimentTool/ML model in the very next MCAT-agent change, or only once enough agents exist to justify the investment?
+- [x] Should the frustration/readiness heuristics in FR4 be replaced by a real SentimentTool/ML model in the very next MCAT-agent change, or only once enough agents exist to justify the investment? **Resolved 2026-07-22, partially:** frustration now comes from the model's own judgment (folded into the same `sonnet-tutor` completion that produces the response, not a dedicated SentimentTool service). Readiness/streak-tracking is unchanged and still heuristic — see FR4 amendment for why that one stayed deterministic.
 
 ## References
 

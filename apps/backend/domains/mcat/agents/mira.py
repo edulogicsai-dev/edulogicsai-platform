@@ -10,8 +10,15 @@ understanding, not keyword heuristics" requirement applied to ARIA)
 recovery detection and the reported risk_level both come from the model's
 own judgment now, not KeywordDistressEstimator/KeywordRecoverySignalClassifier
 (removed -- see llm_support.py for the shared JSON-completion plumbing).
+
+_is_high_distress_message() is the exception: a deterministic, pre-LLM
+safety floor for high-severity distress language, added after the FR4
+amendment below flagged that MIRA -- unlike ARIA's medical-advice guard --
+had no guarantee independent of the model's own judgment. See FR4's second
+amendment for the full account.
 """
 
+import re
 from typing import AsyncIterator, List, Optional
 
 from domains._contracts.agent_io import AgentInput, AgentOutput, EpisodicMemory
@@ -25,6 +32,36 @@ from domains.mcat.agents.llm_support import (
 )
 from llm_gateway.client import LiteLLMGatewayClient, default_gateway_client
 from prompt_registry.client import FilePromptRegistryClient, PromptRegistryClient
+
+# Conservative, high-precision -- a safety floor, not a replacement for the
+# model's own judgment (see respond()). False negatives here are expected
+# and acceptable (the model catches subtler signals); false positives are
+# not, so these stay narrow, specific phrases rather than single words like
+# "worthless" or "failure" alone.
+DISTRESS_GUARD_PATTERNS = [
+    # Explicit self-harm language
+    r"\bkill myself\b",
+    r"\bend(?:ing)? my life\b",
+    r"\bend(?:ing)? it all\b",
+    r"\bsuicid(e|al)\b",
+    r"\bself[\s-]?harm\b",
+    r"\bhurt myself\b",
+    r"\bwant to die\b",
+    r"\bdon'?t want to (be alive|live|exist)\b",
+    # Hopelessness / giving up entirely
+    r"\bgive up on everything\b",
+    r"\bno point\b",
+    r"\bcan'?t do this anymore\b",
+    # Self-worth
+    r"\bi'?m worthless\b",
+    r"\bi'?m a failure\b",
+]
+
+
+def _is_high_distress_message(message: str) -> bool:
+    lowered = message.lower()
+    return any(re.search(pattern, lowered) for pattern in DISTRESS_GUARD_PATTERNS)
+
 
 MIRA_JSON_CONTRACT = """
 
@@ -73,6 +110,7 @@ class Mira(BaseAgent):
 
     async def respond(self, input: AgentInput) -> AsyncIterator[AgentOutput]:
         handoff_cause = _find_handoff_cause(input.episodic_context, input.message)
+        is_high_distress = _is_high_distress_message(input.message)
 
         system_prompt = await self.fetch_prompt() + MIRA_JSON_CONTRACT
         user_content = (
@@ -84,7 +122,13 @@ class Mira(BaseAgent):
 
         parsed = await complete_json(self._gateway_client, system_prompt, user_content)
 
-        risk_level = as_risk_level(parsed.get("risk_level"))
+        # Deterministic safety floor (FR4 amendment, 2026-07-22): high-severity
+        # distress language forces risk_level='high' regardless of what the
+        # model reports. This only ever raises the floor, never lowers it --
+        # the model can still independently report 'high' for subtler signals
+        # this keyword guard misses (same relationship as ARIA's medical-advice
+        # guard to ARIA's own LLM call).
+        risk_level = "high" if is_high_distress else as_risk_level(parsed.get("risk_level"))
         recovered = bool(parsed.get("recovered")) if risk_level != "high" else False
 
         # Safety takes priority over a simultaneous recovery signal -- even

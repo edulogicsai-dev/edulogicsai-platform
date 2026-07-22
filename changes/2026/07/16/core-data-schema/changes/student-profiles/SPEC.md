@@ -5,7 +5,7 @@ status: active
 domain: platform
 issue: TBD
 created: 2026-07-16
-updated: 2026-07-16
+updated: 2026-07-22
 sdd_version: 7.3.0
 parent_epic: ../../SPEC.md
 affected_components: []
@@ -41,8 +41,10 @@ No `student_profiles` table exists. `auth.users` (Supabase Auth, managed) and th
 ### FR2: RLS
 
 **Behavior:**
-- A student can `select`/`insert`/`update` only their own profile (`auth.uid() = user_id`), scoped to their tenant (`tenant_id = current_tenant()`) — both conditions required together.
+- A student can `select`/`insert`/`update` only their own profile (`auth.uid() = user_id`), scoped to a real tenant (`tenant_id in (select id from tenants)`) — both conditions required together.
 - No `delete` policy — profile deletion (if ever needed) is an admin/service-role operation, not exposed to end users.
+
+**Amended 2026-07-22** (`20260722000001_student_profiles_tenant_membership_rls.sql`): originally `tenant_id = current_tenant()`, matching `tenant-foundation`'s `current_tenant()` (reads `app_metadata->>'tenant_id'` from the JWT). Discovered while wiring `auth-flow`'s onboarding insert against a real Supabase Auth session (`changes/2026/07/20/web-chat-integration/changes/auth-flow/`): Supabase Auth does not populate `app_metadata.tenant_id` by default, and this project has no signup hook that sets it — so `current_tenant()` resolves to `null` for every ordinary browser-originated session, and the original policy was never actually satisfiable outside a backend context that does `SET LOCAL app.tenant_id`. Replaced the JWT-claim check with real membership in `tenants` (`tenant_id in (select id from tenants)`) — still rejects a forged/unknown `tenant_id`, just not gated on a claim nothing populates. `auth.uid() = user_id` is unchanged and remains the actual per-row ownership check.
 
 ## Acceptance Criteria
 
@@ -55,7 +57,7 @@ No `student_profiles` table exists. `auth.users` (Supabase Auth, managed) and th
 
 ### Migration
 
-`apps/web/supabase/migrations/<timestamp>_student_profiles.sql`:
+`apps/web/supabase/migrations/20260716000002_student_profiles.sql` (table + original RLS):
 
 ```sql
 create table student_profiles (
@@ -80,6 +82,23 @@ create policy "Students can insert own profile." on student_profiles
 
 create policy "Students can update own profile." on student_profiles
   for update using (auth.uid() = user_id and tenant_id = current_tenant());
+```
+
+`apps/web/supabase/migrations/20260722000001_student_profiles_tenant_membership_rls.sql` (amendment — see FR2):
+
+```sql
+drop policy "Students can view own profile." on student_profiles;
+drop policy "Students can insert own profile." on student_profiles;
+drop policy "Students can update own profile." on student_profiles;
+
+create policy "Students can view own profile." on student_profiles
+  for select using (auth.uid() = user_id and tenant_id in (select id from tenants));
+
+create policy "Students can insert own profile." on student_profiles
+  for insert with check (auth.uid() = user_id and tenant_id in (select id from tenants));
+
+create policy "Students can update own profile." on student_profiles
+  for update using (auth.uid() = user_id and tenant_id in (select id from tenants));
 ```
 
 ## Specs Directory Changes
@@ -115,7 +134,7 @@ create policy "Students can update own profile." on student_profiles
 
 | Component | Reason |
 |-----------|--------|
-| `tenant-foundation` | `tenants` table, `current_tenant()` function |
+| `tenant-foundation` | `tenants` table (RLS membership check as of the 2026-07-22 amendment; `current_tenant()` was the original but is no longer referenced by this table's policies — see FR2) |
 
 ## Out of Scope
 

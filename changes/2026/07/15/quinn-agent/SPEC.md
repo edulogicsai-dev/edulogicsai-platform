@@ -5,7 +5,7 @@ status: active
 domain: mcat
 issue: TBD
 created: 2026-07-15
-updated: 2026-07-15
+updated: 2026-07-22
 sdd_version: 7.3.0
 affected_components: []
 ---
@@ -53,19 +53,21 @@ ARIA (`changes/2026/07/10/aria-agent/`) already sets `suggested_handoff = 'quinn
 **Constraints:**
 - This reuses the existing `episodic_context`/`session_notes` channel rather than adding a new `AgentInput`/`AgentOutput` field (same constraint MIRA operated under — see Open Questions on formalizing this later).
 
-### FR2: Question Generation (Templated Placeholder)
+### FR2: Question Generation (Amended 2026-07-22 — Real LLM, Not a Templated Placeholder)
 
 **Description:** Generate one practice question at a time, grounded in `retrieved_chunks`.
 
 **Behavior:**
 - QUINN shall present exactly one question per turn — never a batch.
-- The question shall be constructed from `retrieved_chunks` content (the concept ARIA handed off on, read via `episodic_context` per FR1) using a deterministic template — not a real LLM call (none is wired up yet).
+- The question shall be constructed from `retrieved_chunks` content (the concept ARIA handed off on, read via `episodic_context` per FR1).
 - `AgentOutput.cited_chunks` shall reference the `ContentChunk.id`s the question was actually constructed from.
 - Question difficulty shall not exceed the student's mastery tier + 1 (approximated the same way ARIA approximates mastery — via prior `episodic_context` mention counts for the concept, since `StudentProfile` has no per-concept mastery field; see `changes/2026/07/10/aria-agent/SPEC.md` FR3's equivalent discovery).
 - The answer shall never be revealed in the same turn the question is presented.
 
+**Amended 2026-07-22:** as originally drafted here (title kept for history, now inaccurate), the question was built from a deterministic template — no LLM call. `quinn.py` now calls Claude Sonnet (`LiteLLMGatewayClient`, model alias `sonnet-tutor`) via a new `LLMQuestionGenerator`, which replaced `TemplatedQuestionGenerator` entirely (removed, not kept as a fallback — every question, including in tests, now goes through the same `QuestionGenerator` interface backed by either a real or mocked LLM call). `cited_chunks` from the model's response is still filtered against `retrieved_chunks`' actual ids before reaching `AgentOutput` (`llm_support.py`'s `valid_cited_chunks`), same defensive pattern as ARIA.
+
 **Constraints:**
-- Question-generation quality is explicitly out of scope for this change (see Out of Scope) — this FR builds the mechanical scaffold (one question, grounded, difficulty-bounded, answer withheld) via a `QuestionGenerator` protocol with a templated placeholder implementation, swappable for a real LLM-backed generator later.
+- Question-generation quality is no longer an explicitly out-of-scope placeholder concern (see Out of Scope) — real question wording/answer/distractor content now comes from the model, via a `QuestionGenerator` protocol (kept as the DI seam) backed by `LLMQuestionGenerator`.
 
 ### FR3: Answer Evaluation & Distractor Analysis
 
@@ -77,8 +79,10 @@ ARIA (`changes/2026/07/10/aria-agent/`) already sets `suggested_handoff = 'quinn
 - QUINN shall never skip distractor analysis.
 - QUINN shall update `consecutive_correct`, `consecutive_wrong`, `questions_completed`, and `correct_count` counters (encoded via FR1's session_notes marker) after every evaluated answer.
 
+**Amended 2026-07-22 — hybrid, correctness stays deterministic:** correctness itself (was the student's answer right or wrong) is **not** an LLM judgment — `quinn.py` still does an exact, case-insensitive string comparison against the stored `correct_answer` from the pending-question marker, unchanged from the original design. What moved to the LLM is the *explanation text* (the actual distractor-analysis prose) and, in the same call, frustration detection (see FR4 amendment) — both come back as fields (`explanation`, `frustration_detected`) in a structured JSON completion. Correctness grading a known answer doesn't benefit from a model's judgment, and the streak/ease-factor math downstream needs it to be exactly reproducible turn to turn — that's why it stayed deterministic even though question generation (FR2) and explanation prose did not.
+
 **Constraints:**
-- Distractor content is limited to what the templated `QuestionGenerator` (FR2) produced and stored in the pending-question marker — this change does not implement genuinely novel distractor reasoning beyond that placeholder.
+- Distractor *content* (the correct/incorrect answer text and reasons) is generated once, at question-presentation time (FR2), and stored in the pending-question marker — the evaluation call (this FR) writes fresh explanation *prose* around those stored facts, it doesn't regenerate or second-guess them.
 
 ### FR4: Handoff Rules
 
@@ -87,12 +91,14 @@ ARIA (`changes/2026/07/10/aria-agent/`) already sets `suggested_handoff = 'quinn
 **Behavior:**
 - If the student gets 3+ consecutive wrong answers on the same concept, `suggested_handoff` shall be `'aria'` (needs re-teaching, not more questions).
 - If the student completes 5+ questions with 80%+ overall accuracy, `suggested_handoff` shall be `'scout'` (ready for a study plan update).
-- If a frustration estimate over the last 3 messages exceeds `0.6` (same threshold and heuristic shape as ARIA's — see `changes/2026/07/10/aria-agent/SPEC.md` FR4), `suggested_handoff` shall be `'mira'`.
+- If frustration is detected, `suggested_handoff` shall be `'mira'`.
 - If multiple conditions are met simultaneously, priority order is: frustration (`'mira'`) > consecutive-wrong (`'aria'`) > accuracy milestone (`'scout'`) — a distressed student takes priority over a purely academic handoff, and needing re-teaching takes priority over being routed to a study-plan update.
 - If none of the above, `suggested_handoff` shall be `null` and QUINN presents another question.
 
+**Amended 2026-07-22:** frustration was originally a keyword-heuristic estimate over the last 3 messages (same shape as ARIA's original `KeywordFrustrationEstimator`, which QUINN imported and reused directly). It's now the `frustration_detected` boolean returned by the same evaluation-phase LLM call described in FR3's amendment — QUINN no longer imports anything frustration-related from `aria.py` (that import was removed along with `KeywordFrustrationEstimator` itself, which no longer exists in either file). Consecutive-wrong and accuracy-milestone detection are unchanged — both are exact counter arithmetic over deterministic state (FR1/FR3), not judgment calls, so neither moved to the LLM.
+
 **Constraints:**
-- All three heuristics (frustration, consecutive-wrong, accuracy) must be deterministic and unit-testable, same constraint as ARIA/MIRA's FR4/FR3.
+- Consecutive-wrong and accuracy-milestone detection remain deterministic and unit-testable with no live LLM call. Frustration detection requires a mocked LLM response in tests, same as ARIA/MIRA's amended FR4/FR3 — the priority order itself (frustration > consecutive-wrong > accuracy) is a plain Python `if`/`elif` chain and stays fully deterministic regardless of how frustration is sourced.
 
 ### FR5: Prohibited Behaviors / Safety Guardrails
 
@@ -104,11 +110,13 @@ ARIA (`changes/2026/07/10/aria-agent/`) already sets `suggested_handoff = 'quinn
 - QUINN shall never present a question above the student's mastery tier + 1 (FR2).
 - QUINN shall never provide medical advice or diagnosis — same guard as ARIA (`changes/2026/07/10/aria-agent/SPEC.md` FR5), applied independently of prompt content.
 
+**Confirmed unchanged 2026-07-22:** like ARIA's medical-advice guard (and unlike MIRA's distress check, which moved to the LLM — see `mira-agent/SPEC.md` FR4's amendment), QUINN's medical-advice guard is still a plain Python regex check against `message`, evaluated *before* any LLM call — when it fires, `quinn.py` returns immediately with a deterministic decline message and `risk_level = 'high'`, preserving any pending question unchanged (FR1), without ever calling `sonnet-tutor` for that turn.
+
 ## Non-Functional Requirements
 
 | Requirement | Target | Measurement |
 |-------------|--------|-------------|
-| State-machine determinism | Same `episodic_context`/`message` input always yields the same evaluation/handoff | Unit tests |
+| State-machine determinism | Same `episodic_context`/`message` input always yields the same evaluation/handoff | **Amended 2026-07-22: true for correctness grading, streak/ease-factor counters, and the consecutive-wrong/accuracy handoff branches — question wording, distractor explanation prose, and frustration-driven handoff now depend on a live model (FR2/FR3/FR4 amendments)** — Unit tests (deterministic paths); mocked-LLM tests (question/explanation/frustration) |
 | Test coverage | All FR1–FR5 behaviors have at least one passing test | pytest suite |
 | No regression | ARIA's and MIRA's existing 21 tests still pass unchanged | pytest suite (full run) |
 
@@ -138,14 +146,40 @@ QUINN extends the same `BaseAgent` ARIA and MIRA extend — no changes to `_cont
 
 **Pending-question marker format (session_notes):** `"quinn_pending: " + json.dumps({...})`, encoding concept, correct answer, distractor + reasons, and the four streak counters. **As implemented:** JSON rather than the ad-hoc key=value string originally sketched here, to avoid brittle parsing if chunk text or reasons contain `;`/`=` characters. Read back from the most recent `episodic_context` entry by `occurredAt`, same lookup pattern as ARIA/MIRA. When the medical-advice guard (FR5) fires while a question is pending, the same marker is re-emitted unchanged rather than lost.
 
-**Question generation (placeholder):** given a concept key (from `episodic_context`, per FR1) and `retrieved_chunks`, construct a single true/false-style or fill-in-style question referencing chunk content directly, with one deterministic "correct" statement and one deterministic "distractor" statement plus a templated reason each is right/wrong. Not MCAT-quality — see Out of Scope.
+**Question generation (amended 2026-07-22):** originally a deterministic template (kept in git history) producing a single true/false-style statement with one hardcoded distractor. Now: given a concept key (from `episodic_context`, per FR1) and `retrieved_chunks`, `LLMQuestionGenerator` sends `quinn_v1.md`'s content plus an appended JSON-format instruction to `sonnet-tutor` and parses `prompt_text`/`correct_answer`/`correct_reason`/`distractor`/`distractor_reason`/`cited_chunks` from the response (see LLM Response Contract below). The dataclass shape (`GeneratedQuestion`: one correct answer, one distractor, each with a reason) is unchanged from the original design — still a simplification relative to `quinn_v1.md`'s narrative description of full 4-option (A/B/C/D) MCQs with distractor analysis on every wrong option; real generation replaced the deterministic template, but the single-distractor structural simplification was kept rather than also expanding to 4 options, to keep this change scoped to "swap templates for real calls," not a redesign.
 
-**Difficulty bound:** same heuristic as ARIA's mastery approximation — count of prior `episodic_context` mentions of the concept, capped so a concept mentioned 0 times only gets the most basic templated question tier.
+**Difficulty bound:** same heuristic as ARIA's mastery approximation — count of prior `episodic_context` mentions of the concept, capped so a concept mentioned 0 times only gets the most basic difficulty tier. Unchanged by the 2026-07-22 LLM wiring — still Python-computed, passed to the generator as an instruction ("never exceed one tier above the student's demonstrated level"), not something the model decides on its own.
 
 **Edge Cases:**
 - QUINN invoked with no `episodic_context` at all (no prior ARIA handoff, no pending question): fall back to generating a question grounded only in `retrieved_chunks`/`message`, difficulty tier 0.
-- Student's `message` doesn't match either the correct answer or a recognized distractor (ambiguous/off-topic reply): treat as incorrect, still run full distractor analysis, don't crash or silently skip.
-- All three handoff conditions technically met at once (frustration, 3+ wrong, 5+ questions at 80%+): frustration wins per FR4's stated priority order (extremely unlikely combination — 3+ consecutive wrong contradicts 80%+ overall accuracy in practice, but the priority order still resolves it deterministically).
+- Student's `message` doesn't match either the correct answer or a recognized distractor (ambiguous/off-topic reply): treat as incorrect, still run full distractor analysis, don't crash or silently skip. Correctness comparison itself is still an exact string match (FR3 amendment) — unaffected by this edge case being ambiguous to a human reader, since the comparison is mechanical.
+- All three handoff conditions technically met at once (frustration, 3+ wrong, 5+ questions at 80%+): frustration wins per FR4's stated priority order (extremely unlikely combination — 3+ consecutive wrong contradicts 80%+ overall accuracy in practice, but the priority order still resolves it deterministically, regardless of frustration now being LLM-sourced).
+
+### LLM Response Contract (Added 2026-07-22)
+
+Two distinct JSON contracts, appended to `quinn_v1.md`'s content depending on which phase `respond()` is in:
+
+**Presenting a new question (FR2):**
+```json
+{
+  "prompt_text": "<question, ending with 'Take your time -- what's your answer?'>",
+  "correct_answer": "<exact expected reply>",
+  "correct_reason": "<why it's correct>",
+  "distractor": "<one plausible wrong answer>",
+  "distractor_reason": "<why it's tempting but wrong>",
+  "cited_chunks": ["<chunk_id>", "..."]
+}
+```
+
+**Evaluating an answer (FR3/FR4):**
+```json
+{
+  "explanation": "<full distractor-analysis prose, confirm correct/incorrect first>",
+  "frustration_detected": true
+}
+```
+
+Both go through `llm_support.py`'s shared `complete_json` (same helper ARIA/MIRA use). A non-JSON or malformed completion raises `LLMResponseParseError`, left to propagate the same way as ARIA/MIRA — `sse-endpoint`'s existing SSE error handling turns it into a graceful `event: error`.
 
 ## API Contract
 
@@ -187,7 +221,7 @@ QUINN extends the same `BaseAgent` ARIA and MIRA extend — no changes to `_cont
 - [ ] **AC3:** Given `retrieved_chunks` used to construct the question, when QUINN presents it, then `AgentOutput.cited_chunks` references those chunk ids.
 - [ ] **AC4:** Given 3 consecutive wrong answers on the same concept, when QUINN responds, then `AgentOutput.suggested_handoff == 'aria'`.
 - [ ] **AC5:** Given 5+ completed questions with 80%+ accuracy and no frustration/consecutive-wrong condition met, when QUINN responds, then `AgentOutput.suggested_handoff == 'scout'`.
-- [ ] **AC6:** Given the last 3 messages score above the frustration threshold, when QUINN responds, then `AgentOutput.suggested_handoff == 'mira'`, taking priority over any simultaneous accuracy/consecutive-wrong condition.
+- [ ] **AC6:** Given the model's structured evaluation response reports `frustration_detected: true` (amended 2026-07-22 — originally "the last 3 messages score above the frustration threshold"), when QUINN responds, then `AgentOutput.suggested_handoff == 'mira'`, taking priority over any simultaneous accuracy/consecutive-wrong condition.
 - [ ] **AC7:** Given a medical-advice request, when QUINN responds, then it's declined and `risk_level == 'high'`.
 - [ ] **AC8:** Given any response, when inspected, then it never reveals the answer before an attempt, never skips distractor analysis, and never exceeds the student's mastery tier + 1.
 - [ ] **AC9:** Given the full existing ARIA + MIRA test suite, when re-run after this change, then all 21 tests still pass unchanged (no regression).
@@ -241,12 +275,12 @@ No new terms — QUINN, Handoff, BaseAgent, AgentInput, AgentOutput all pre-exis
 
 ### Gaps & Assumptions
 
-- Assumes question-generation quality is out of scope — this is a mechanical scaffold, not exam-quality item writing (same assumption class as ARIA/MIRA's heuristic placeholders).
+- Assumes question-generation quality is out of scope — this is a mechanical scaffold, not exam-quality item writing (same assumption class as ARIA/MIRA's heuristic placeholders). **Amended 2026-07-22:** no longer accurate as a blanket statement — question wording, correctness reasoning, and distractor explanation prose now come from a real LLM call (FR2/FR3 amendments), not a template. Exam-quality *tuning* of that generation (prompt-engineering `quinn_v1.md` further, expanding beyond one distractor to full 4-option MCQs) remains unaddressed — see FR2 amendment's note on the kept single-distractor simplification.
 - Assumes `StudentProfile` still has no per-concept mastery field (unchanged since the ARIA change) — difficulty bounding uses the same `episodic_context` mention-count proxy ARIA established.
 
 ### Cross-References
 
-- `changes/2026/07/10/aria-agent/` — `BaseAgent`, contract mirrors, frustration-heuristic pattern, mastery-approximation pattern.
+- `changes/2026/07/10/aria-agent/` — `BaseAgent`, contract mirrors, mastery-approximation pattern, and (as of 2026-07-22) the real-LLM-wiring pattern QUINN also follows (`LiteLLMGatewayClient`, `llm_support.py`). The frustration-*heuristic* pattern QUINN originally reused (`KeywordFrustrationEstimator`, imported directly from `aria.py`) no longer exists in either file — see FR4 amendment.
 - `changes/2026/07/15/mira-agent/` — `episodic_context`-as-handoff-context pattern.
 - `specs/domain/glossary.md` — pre-existing QUINN, Handoff entries.
 
@@ -277,12 +311,12 @@ No new terms — QUINN, Handoff, BaseAgent, AgentInput, AgentOutput all pre-exis
 
 | Component | Test Case | Expected Behavior |
 |-----------|-----------|--------------------|
-| quinn.py | No pending question, `retrieved_chunks` provided | Presents one question, answer withheld, `cited_chunks` populated (AC1, AC3) |
-| quinn.py | Pending question + correct answer | Confirms correct, full distractor analysis given (AC2) |
-| quinn.py | Pending question + incorrect answer | Confirms incorrect, full distractor analysis given (AC2) |
+| quinn.py | No pending question, `retrieved_chunks` provided, mocked question-generation response (amended 2026-07-22 — was a real templated call, now a mocked LLM completion) | Presents one question, answer withheld, `cited_chunks` populated (AC1, AC3) |
+| quinn.py | Pending question + correct answer, mocked evaluation response (amended 2026-07-22) | Confirms correct, full distractor analysis given (AC2) |
+| quinn.py | Pending question + incorrect answer, mocked evaluation response (amended 2026-07-22) | Confirms incorrect, full distractor analysis given (AC2) |
 | quinn.py | 3 consecutive wrong on same concept | `suggested_handoff == 'aria'` (AC4) |
 | quinn.py | 5+ questions, 80%+ accuracy, no frustration/wrong-streak | `suggested_handoff == 'scout'` (AC5) |
-| quinn.py | Frustration > 0.6 + simultaneous wrong-streak/accuracy condition | `suggested_handoff == 'mira'` wins (AC6) |
+| quinn.py | Mocked evaluation response reports `frustration_detected: true` (amended 2026-07-22; was "frustration > 0.6") + simultaneous wrong-streak/accuracy condition | `suggested_handoff == 'mira'` wins (AC6) |
 | quinn.py | Medical advice request | Declined, `risk_level == 'high'` (AC7) |
 | quinn.py | Any response | No answer-before-attempt, no skipped distractor analysis, no over-tier question (AC8) |
 | (full suite) | Re-run existing ARIA + MIRA tests | 21/21 still pass (AC9) |
@@ -300,7 +334,7 @@ No new terms — QUINN, Handoff, BaseAgent, AgentInput, AgentOutput all pre-exis
 
 | Component | Version | Reason |
 |-----------|---------|--------|
-| `changes/2026/07/10/aria-agent/` | Complete | `BaseAgent`, contract mirrors, `PromptRegistryClient`, frustration-heuristic pattern reused |
+| `changes/2026/07/10/aria-agent/` | Complete | `BaseAgent`, contract mirrors, `PromptRegistryClient`; originally also `KeywordFrustrationEstimator` (reused directly via import), removed 2026-07-22 when frustration detection moved to the LLM (FR4 amendment) — QUINN no longer imports anything frustration-related from `aria.py` |
 | `changes/2026/07/15/mira-agent/` | Complete | `episodic_context`-as-state-channel pattern reused |
 
 ## Migration / Rollback
@@ -309,7 +343,7 @@ Nothing depends on QUINN yet (not served over HTTP) — revert the commit/PR to 
 
 ## Out of Scope
 
-- Real, exam-quality MCAT question generation — FR2 is an explicitly mechanical placeholder pending LiteLLM integration.
+- ~~Real, exam-quality MCAT question generation~~ — LiteLLM integration done 2026-07-22 (FR2 amendment); exam-quality *tuning* of that generation (beyond the kept single-distractor simplification) remains unaddressed.
 - SCOUT itself (the handoff target for the accuracy milestone) — not implemented; this change only sets `suggested_handoff = 'scout'`.
 - A dedicated typed "cross-turn state" contract field — this is the third agent to reuse the `episodic_context`/`session_notes` marker pattern; formalizing it is tracked as an Open Question, not built here.
 - NEXUS/LangGraph/SSE wiring, real human-escalation wiring for `risk_level = 'high'` — same as prior MCAT agent changes.
@@ -318,8 +352,9 @@ Nothing depends on QUINN yet (not served over HTTP) — revert the commit/PR to 
 ## Open Questions
 
 - [ ] Now that ARIA, MIRA, and QUINN all reuse `episodic_context`/`session_notes` for different cross-turn state purposes, should a dedicated, typed contract field (or small set of fields) be added to `AgentInput`/`AgentOutput` to replace this pattern? (Raised in the MIRA change; now has a third data point.)
-- [ ] When should the templated `QuestionGenerator` placeholder be replaced with real LLM-backed question generation (LiteLLM)?
-- [ ] Same open question as ARIA/MIRA: when should frustration/distress heuristics be replaced with a real signal source?
+- [x] When should the templated `QuestionGenerator` placeholder be replaced with real LLM-backed question generation (LiteLLM)? **Resolved 2026-07-22** — see FR2 amendment.
+- [x] Same open question as ARIA/MIRA: when should frustration/distress heuristics be replaced with a real signal source? **Resolved 2026-07-22** — see FR4 amendment; correctness grading and streak counters intentionally stayed deterministic (FR3 amendment explains why).
+- [ ] New (2026-07-22): should QUINN's single-distractor `GeneratedQuestion` shape be expanded to full 4-option (A/B/C/D) MCQs, matching `quinn_v1.md`'s narrative description more closely? Kept as-is in the LLM-wiring change to stay scoped to "swap templates for real calls," not a redesign (see FR2 amendment).
 
 ## References
 

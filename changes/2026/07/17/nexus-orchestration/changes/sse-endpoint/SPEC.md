@@ -5,7 +5,7 @@ status: active
 domain: mcat
 issue: TBD
 created: 2026-07-17
-updated: 2026-07-17
+updated: 2026-07-22
 sdd_version: 7.3.0
 parent_epic: ../../SPEC.md
 affected_components: []
@@ -35,9 +35,11 @@ Every piece this endpoint composes already exists: `run_turn` (`langgraph-state-
 ### FR2: JWT Authentication
 
 **Behavior:**
-- The `Authorization: Bearer <token>` header shall be verified against a configured secret (`JWTVerifier`, secret from an environment variable — **a test secret in this change**, not Supabase's real signing key, per the epic's local-substitute decision).
+- The `Authorization: Bearer <token>` header shall be verified via `JWTVerifier`.
 - On success, the token's `sub` claim is the authenticated `user_id`.
 - On missing, malformed, or invalid-signature/expired token: `401`.
+
+**Amended 2026-07-22:** originally a single shared-secret HS256 check (a test secret in this change's original scope, not Supabase's real signing key — see Gaps & Assumptions). Supabase has since rotated this project's signing keys from legacy HS256 to ECC (ES256), which isn't verifiable with a static shared secret at all. `JWTVerifier` now fetches Supabase's `/.well-known/jwks.json` via `PyJWKClient` and verifies against whichever key the token's `kid` header points to, accepting both `ES256` and `HS256` (`algorithms=["ES256", "HS256"]`) so a legacy-signed token would still verify if one were ever presented. `main.py` constructs it with a real `jwks_url` (`https://cvxtqcebikmqaskvewlm.supabase.co/auth/v1/.well-known/jwks.json` — see CLAUDE.md's Supabase project URL) alongside the existing `secret`/`JWT_SECRET` fallback param, which `JWTVerifier` only falls back to if no `jwks_url` is configured.
 
 ### FR3: Tenant Membership Validation (Security Gap Closed Here)
 
@@ -61,6 +63,12 @@ Every piece this endpoint composes already exists: `run_turn` (`langgraph-state-
 
 **Constraints:**
 - **This is not yet token-level incremental generation** — since no agent currently calls a real LLM (all deterministic), "streaming" here means one SSE event per agent hop in the handoff cascade, not per-token. Real token streaming requires real LLM integration (out of scope — see Gaps & Assumptions).
+
+### FR6a: CORS (Added 2026-07-22)
+
+**Behavior:**
+- `main.py` registers FastAPI's `CORSMiddleware` app-wide (not scoped to just `/api/chat`): `allow_origins=["http://localhost:3000", "http://localhost:3001"]` (the `web-chat-integration` epic's Next.js dev server), `allow_credentials=True`, `allow_methods=["*"]`, `allow_headers=["*"]`.
+- Added once `apps/web` (a real browser origin, not `httpx.AsyncClient` calling the ASGI app in-process) needed to call `/api/chat` directly — this endpoint was never exercised cross-origin before that epic. No production origin is configured yet (see Out of Scope).
 
 ### FR6: Error Handling
 
@@ -88,9 +96,10 @@ Every piece this endpoint composes already exists: `run_turn` (`langgraph-state-
 apps/backend/
 ├── auth/
 │   └── jwt_verifier.py     # JWTVerifier, verify(token) -> user_id | raises
+│                           #   (PyJWKClient-backed as of 2026-07-22, see FR2)
 ├── api/
 │   └── chat.py             # POST /api/chat: ChatRequest, endpoint, SSE formatting
-└── main.py                 # mounts the /api/chat router (modified)
+└── main.py                 # mounts the /api/chat router; CORSMiddleware (FR6a, 2026-07-22)
 ```
 
 ### SSE Event Format
@@ -115,9 +124,9 @@ data: {"error": "Something went wrong processing your message."}
 
 ## Gaps & Assumptions
 
-- "Streaming" is per-agent-hop (one SSE event per cascade step), not per-token — real token-level streaming needs a live LLM integration, which doesn't exist yet (all 3 agents are deterministic). Flagged, not hidden.
-- The JWT secret used for verification in this change is a test secret, not Supabase's real signing key (epic Requirements Discovery) — swapping in the real key when credentials exist should be a config change, not a code change, since `JWTVerifier` takes the secret as a parameter.
-- `main.py`'s `/api/chat` mounting is conditional on `JWT_SECRET`/`DATABASE_URL` being set (checked in a `lifespan` handler) — neither exists in this environment, so the router simply isn't mounted for `apps/backend`'s default/test usage, rather than crashing every other test that boots the app (e.g. `test_health.py`).
+- "Streaming" is per-agent-hop (one SSE event per cascade step), not per-token — see the amended Out of Scope entry above: this is still true even after ARIA/MIRA/QUINN started calling a real LLM, since each agent awaits one full completion per turn rather than forwarding a token stream.
+- **Amended 2026-07-22:** the original assumption here ("the JWT secret used for verification in this change is a test secret... swapping in the real key when credentials exist should be a config change") undersold what actually changed — it wasn't a same-shape secret swap, because Supabase rotated the *signing algorithm* (HS256 → ES256), which a shared-secret `JWTVerifier` can't verify at all regardless of which secret value it's given. See FR2's amendment for the actual fix (`PyJWKClient` against the real JWKS endpoint).
+- `main.py`'s `/api/chat` mounting is conditional on `JWT_SECRET`/`DATABASE_URL` being set (checked in a `lifespan` handler) — neither exists in this environment, so the router simply isn't mounted for `apps/backend`'s default/test usage, rather than crashing every other test that boots the app (e.g. `test_health.py`). `JWT_SECRET` remains the gate even though `JWTVerifier` now primarily verifies via JWKS — it's still passed as the fallback param (see FR2) and used as the "is this configured at all" signal.
 - **Discovered during implementation:** FastAPI's synchronous `TestClient` runs the ASGI app in a separate thread with its own event loop — an `asyncpg` pool created in the test's own (pytest-asyncio) event loop can't be used from that other loop (`InterfaceError: another operation is in progress`). Switched to `httpx.AsyncClient` + `ASGITransport`, which calls the app in-process on the same loop. This matters for anyone writing further async-DB-backed FastAPI tests in this codebase, not just this change.
 - **Discovered during implementation:** an empty-agents `DomainConfig` doesn't make `run_turn` raise — LangGraph's conditional entry-point routing silently drops a write to an unmapped channel (logs a warning, produces zero outputs) rather than erroring. AC6's test forces a real error via an agent factory that raises inside a genuine graph node instead.
 
@@ -148,14 +157,15 @@ data: {"error": "Something went wrong processing your message."}
 
 | Library | Reason |
 |---------|--------|
-| `PyJWT` | JWT verification |
+| `PyJWT` | JWT verification, including `jwt.PyJWKClient` for JWKS-based verification (FR2 amendment, 2026-07-22) — no new package, same library |
 
 ## Out of Scope
 
-- Real Supabase JWT signing key.
-- Token-level incremental streaming (needs real LLM integration).
-- Rate limiting, CORS configuration, production auth hardening beyond the membership check in FR3.
-- Frontend (`apps/web`) integration.
+- ~~Real Supabase JWT signing key~~ — done 2026-07-22, see FR2's amendment (JWKS/ES256).
+- Token-level incremental streaming (needs real LLM integration to a real *token stream*; ARIA/MIRA/QUINN now call a real LLM per `aria-agent`/`mira-agent`/`quinn-agent` SPEC.md amendments, but each agent still awaits one full completion and yields once — so this endpoint's SSE granularity is unchanged: still one event per agent hop, not per token).
+- ~~Rate limiting, CORS configuration~~ — dev-only CORS done 2026-07-22 (FR6a); rate limiting and production-origin CORS hardening remain out of scope.
+- Production auth hardening beyond the membership check in FR3.
+- Frontend (`apps/web`) integration — done via the `web-chat-integration` epic (2026-07-20), which is what surfaced the JWKS and CORS gaps above; that epic's own specs cover the frontend side.
 
 ## References
 
