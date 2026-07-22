@@ -9,15 +9,22 @@ from domains._contracts.domain_registry import registry
 from domains.mcat.agents.aria import Aria
 from domains.mcat.agents.mira import Mira
 from domains.mcat.agents.quinn import Quinn
+from llm_gateway.client import default_gateway_client
+
+# One shared client for all three agents -- a single read of
+# LITELLM_BASE_URL/LITELLM_MASTER_KEY, not three independent ones. Safe to
+# construct at import time: LiteLLMGatewayClient.__init__ makes no network
+# call (see llm_gateway/client.py).
+_gateway_client = default_gateway_client()
 
 MCAT_DOMAIN_CONFIG = DomainConfig(
     id="mcat",
     name="MCATai",
     subdomain="app.mcatai.co",
     agents=[
-        AgentDef(id="aria", display_name="ARIA", create_agent=lambda: Aria()),
-        AgentDef(id="mira", display_name="MIRA", create_agent=lambda: Mira()),
-        AgentDef(id="quinn", display_name="QUINN", create_agent=lambda: Quinn()),
+        AgentDef(id="aria", display_name="ARIA", create_agent=lambda: Aria(gateway_client=_gateway_client)),
+        AgentDef(id="mira", display_name="MIRA", create_agent=lambda: Mira(gateway_client=_gateway_client)),
+        AgentDef(id="quinn", display_name="QUINN", create_agent=lambda: Quinn(gateway_client=_gateway_client)),
     ],
     content_index="mcat_content",
     eval_rubric=EvalRubric(

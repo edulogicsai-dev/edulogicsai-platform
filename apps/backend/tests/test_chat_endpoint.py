@@ -89,7 +89,7 @@ def _parse_sse_events(body: str) -> list[tuple[str, str]]:
 
 
 async def test_valid_request_streams_message_and_done(
-    client: httpx.AsyncClient, seed_conn: asyncpg.Connection
+    client: httpx.AsyncClient, seed_conn: asyncpg.Connection, mock_llm_transport
 ) -> None:
     # AC1
     user_id = await _seed_member(seed_conn)
@@ -150,7 +150,7 @@ async def test_valid_jwt_without_tenant_membership_returns_403(client: httpx.Asy
 
 
 async def test_handoff_visible_across_ordered_sse_events(
-    client: httpx.AsyncClient, seed_conn: asyncpg.Connection
+    client: httpx.AsyncClient, seed_conn: asyncpg.Connection, mock_llm_transport
 ) -> None:
     # AC5
     user_id = await _seed_member(seed_conn)
@@ -240,7 +240,7 @@ async def test_forced_turn_error_yields_graceful_sse_error_event(
 
 
 async def test_new_session_created_vs_existing_session_incremented(
-    client: httpx.AsyncClient, seed_conn: asyncpg.Connection
+    client: httpx.AsyncClient, seed_conn: asyncpg.Connection, mock_llm_transport
 ) -> None:
     # AC7
     user_id = await _seed_member(seed_conn)

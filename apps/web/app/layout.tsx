@@ -6,13 +6,16 @@ import { PropsWithChildren, Suspense } from 'react';
 import { getURL } from '@/utils/helpers';
 import 'styles/main.css';
 
-const title = 'Next.js Subscription Starter';
-const description = 'Brought to you by Vercel, Stripe, and Supabase.';
+const title = 'MCATai';
+const description = 'Your MCAT AI Prep Buddy';
 
 export const metadata: Metadata = {
   metadataBase: new URL(getURL()),
   title: title,
   description: description,
+  icons: {
+    icon: '/mcatai-logo.svg', // References public/mcatai-logo.svg
+  },
   openGraph: {
     title: title,
     description: description

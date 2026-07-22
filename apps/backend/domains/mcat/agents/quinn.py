@@ -3,31 +3,85 @@ QUINN -- the Practice Question Intelligence agent for MCATai.
 See changes/2026/07/15/quinn-agent/SPEC.md (FR1-FR5) and
 domains/mcat/prompts/quinn_v1.md for QUINN's authored system prompt.
 
-Question generation is a deterministic templated placeholder (FR2) pending
-real LLM integration. Cross-turn state (pending question, streak counters)
-is encoded into session_notes/episodic_context, extending the pattern
-established by ARIA/MIRA (changes/2026/07/10/aria-agent/,
-changes/2026/07/15/mira-agent/) in the absence of a persistence layer.
+Question generation and answer-evaluation text now call Claude (via
+LiteLLMGatewayClient, model alias "sonnet-tutor") -- see LLMQuestionGenerator
+and Quinn._evaluate_answer below, and llm_support.py for the shared
+JSON-completion plumbing. Cross-turn state (pending question, streak
+counters, ease factor) stays deterministic Python bookkeeping, encoded into
+session_notes/episodic_context exactly as before: correctness is an exact
+string match against the stored correct_answer (grading a known MCQ answer
+doesn't benefit from an LLM's judgment, and the ease-factor/streak math must
+be exactly reproducible turn to turn). Frustration detection for the
+MIRA handoff, like ARIA's, now comes from the model's own understanding of
+the message rather than a keyword list.
 """
 
 import datetime
 import json
+import re
 from dataclasses import dataclass
 from typing import AsyncIterator, List, Optional, Protocol
 
 from domains._contracts.agent_io import AgentInput, AgentOutput, ContentChunk, EpisodicMemory, MasteryDelta
 from domains._contracts.base_agent import BaseAgent
-from domains.mcat.agents.aria import (
-    MEDICAL_ADVICE_PATTERNS,  # reused as-is
-    FrustrationEstimator,
-    KeywordFrustrationEstimator,
+from domains.mcat.agents.llm_support import (
+    complete_json,
+    render_chunks,
+    render_session_history,
+    valid_cited_chunks,
+    as_bool,
+    as_str,
 )
+from llm_gateway.client import LiteLLMGatewayClient, default_gateway_client
 from prompt_registry.client import FilePromptRegistryClient, PromptRegistryClient
+
+MEDICAL_ADVICE_PATTERNS = [
+    r"\bshould i (take|see a doctor)\b",
+    r"\bdo i have\b",
+    r"\bwhat medication\b",
+    r"\bcan you diagnose\b",
+    r"\bmy (symptom|diagnosis|prescription)\b",
+]
 
 PENDING_MARKER_PREFIX = "quinn_pending: "
 DEFAULT_EASE_FACTOR = 2.5
 MAX_EASE_FACTOR = 3.0
 MIN_EASE_FACTOR = 1.3
+
+QUESTION_JSON_CONTRACT = """
+
+## Required Response Format (Presenting a New Question -- Phase 1)
+
+Respond with ONLY a single JSON object -- no markdown code fences, no prose \
+outside the JSON. Use exactly these keys:
+
+{
+  "prompt_text": "<the question itself, presented per Phase 1 -- end with \
+'Take your time -- what's your answer?'. Never reveal the answer here.>",
+  "correct_answer": "<the correct answer, exactly as the student should type it back>",
+  "correct_reason": "<why the correct answer is correct>",
+  "distractor": "<one plausible wrong answer>",
+  "distractor_reason": "<why that wrong answer is tempting but incorrect>",
+  "cited_chunks": ["<chunk_id>", "..."]
+}
+"""
+
+EVALUATION_JSON_CONTRACT = """
+
+## Required Response Format (Evaluating an Answer -- Phase 2)
+
+Respond with ONLY a single JSON object -- no markdown code fences, no prose \
+outside the JSON. Use exactly these keys:
+
+{
+  "explanation": "<Phase 2 evaluation per the guidance above -- confirm \
+correct/incorrect immediately, then full distractor analysis for both the \
+correct answer and the wrong one, every time, even when a handoff follows>",
+  "frustration_detected": true or false -- true only if the signals \
+described in \"When to Hand Off > To MIRA\" are present in the student's \
+recent messages
+}
+"""
 
 
 def _adjust_ease_factor(previous: float, correct: bool) -> float:
@@ -54,43 +108,38 @@ class GeneratedQuestion:
 
 
 class QuestionGenerator(Protocol):
-    def generate(
-        self, concept: str, chunks: List[ContentChunk], difficulty_tier: int
+    async def generate(
+        self, system_prompt: str, concept: str, chunks: List[ContentChunk], difficulty_tier: int
     ) -> GeneratedQuestion: ...
 
 
-class TemplatedQuestionGenerator:
-    """Interim placeholder -- see SPEC.md FR2, Out of Scope. Not exam-quality."""
+class LLMQuestionGenerator:
+    def __init__(self, gateway_client: LiteLLMGatewayClient) -> None:
+        self._gateway_client = gateway_client
 
-    def generate(
-        self, concept: str, chunks: List[ContentChunk], difficulty_tier: int
+    async def generate(
+        self, system_prompt: str, concept: str, chunks: List[ContentChunk], difficulty_tier: int
     ) -> GeneratedQuestion:
-        if chunks:
-            source_text = chunks[0].text
-            chunk_ids = [c.id for c in chunks]
-        else:
-            source_text = concept
-            chunk_ids = []
-
-        qualifier = "in the most basic sense," if difficulty_tier <= 0 else "in more depth,"
-        prompt_text = (
-            f'True or false: {qualifier} "{source_text}" accurately describes {concept}.'
+        user_content = (
+            f"Concept to test: {concept}\n"
+            f"Difficulty tier (0 = most basic; never exceed one tier above the "
+            f"student's demonstrated level): {difficulty_tier}\n\n"
+            f"Retrieved content to ground the question in:\n{render_chunks(chunks)}\n\n"
+            f"Generate ONE new question per Phase 1 of your question cycle."
         )
-
+        parsed = await complete_json(self._gateway_client, system_prompt + QUESTION_JSON_CONTRACT, user_content)
         return GeneratedQuestion(
             concept=concept,
-            prompt_text=prompt_text,
-            correct_answer="true",
-            correct_reason=f"it reflects the retrieved material on {concept}",
-            distractor="false",
-            distractor_reason=f"it contradicts the retrieved material on {concept}",
-            cited_chunk_ids=chunk_ids,
+            prompt_text=as_str(parsed.get("prompt_text")),
+            correct_answer=as_str(parsed.get("correct_answer")),
+            correct_reason=as_str(parsed.get("correct_reason")),
+            distractor=as_str(parsed.get("distractor")),
+            distractor_reason=as_str(parsed.get("distractor_reason")),
+            cited_chunk_ids=valid_cited_chunks(parsed.get("cited_chunks"), chunks),
         )
 
 
 def _is_medical_advice_request(message: str) -> bool:
-    import re
-
     lowered = message.lower()
     return any(re.search(pattern, lowered) for pattern in MEDICAL_ADVICE_PATTERNS)
 
@@ -140,12 +189,12 @@ class Quinn(BaseAgent):
     def __init__(
         self,
         prompt_client: Optional[PromptRegistryClient] = None,
+        gateway_client: Optional[LiteLLMGatewayClient] = None,
         question_generator: Optional[QuestionGenerator] = None,
-        frustration_estimator: Optional[FrustrationEstimator] = None,
     ) -> None:
         self._prompt_client = prompt_client or FilePromptRegistryClient(domain="mcat")
-        self._generator = question_generator or TemplatedQuestionGenerator()
-        self._frustration_estimator = frustration_estimator or KeywordFrustrationEstimator()
+        self._gateway_client = gateway_client or default_gateway_client()
+        self._generator = question_generator or LLMQuestionGenerator(self._gateway_client)
 
     async def fetch_prompt(self) -> str:
         return self._prompt_client.get_prompt("quinn", "v1")
@@ -182,7 +231,8 @@ class Quinn(BaseAgent):
     async def _present_fresh_question(self, input: AgentInput) -> AsyncIterator[AgentOutput]:
         concept = _infer_concept(input)
         difficulty_tier = _count_prior_mentions(concept, input.episodic_context)
-        question = self._generator.generate(concept, input.retrieved_chunks, difficulty_tier)
+        base_prompt = await self.fetch_prompt()
+        question = await self._generator.generate(base_prompt, concept, input.retrieved_chunks, difficulty_tier)
         streaks = {
             "consecutive_correct": 0,
             "consecutive_wrong": 0,
@@ -231,18 +281,22 @@ class Quinn(BaseAgent):
             reviewedAt=datetime.datetime.now(datetime.timezone.utc).isoformat(),
         )
 
-        verdict = "Correct!" if is_correct else "Not quite."
-        explanation = (
-            f"{verdict} \"{pending['correct_answer']}\" is right because "
-            f"{pending['correct_reason']}. \"{pending['distractor']}\" is wrong because "
-            f"{pending['distractor_reason']}."
+        base_prompt = await self.fetch_prompt()
+        eval_user_content = (
+            f"The student answered: {input.message}\n"
+            f"This answer was {'CORRECT' if is_correct else 'INCORRECT'}.\n"
+            f"Correct answer: \"{pending['correct_answer']}\" -- {pending['correct_reason']}\n"
+            f"Incorrect option to analyze: \"{pending['distractor']}\" -- {pending['distractor_reason']}\n\n"
+            f"Recent conversation this session:\n{render_session_history(input.session_history, limit=4)}"
         )
-
-        recent_user_messages = [m for m in input.session_history if m.role == "user"][-3:]
-        frustration_score = self._frustration_estimator.estimate(recent_user_messages)
+        parsed = await complete_json(
+            self._gateway_client, base_prompt + EVALUATION_JSON_CONTRACT, eval_user_content
+        )
+        explanation = as_str(parsed.get("explanation"))
+        frustration_detected = as_bool(parsed.get("frustration_detected"))
 
         suggested_handoff: Optional[str] = None
-        if frustration_score > 0.6:
+        if frustration_detected:
             suggested_handoff = "mira"
         elif consecutive_wrong >= 3:
             suggested_handoff = "aria"
@@ -270,7 +324,7 @@ class Quinn(BaseAgent):
             return
 
         concept = str(pending["concept"])
-        next_question = self._generator.generate(concept, input.retrieved_chunks, consecutive_correct)
+        next_question = await self._generator.generate(base_prompt, concept, input.retrieved_chunks, consecutive_correct)
         yield AgentOutput(
             response=f"{explanation} {next_question.prompt_text}",
             agent_id=self.id,

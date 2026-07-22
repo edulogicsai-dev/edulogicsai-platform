@@ -7,6 +7,10 @@ import Logo from '@/components/icons/Logo';
 import { usePathname, useRouter } from 'next/navigation';
 import { getRedirectMethod } from '@/utils/auth-helpers/settings';
 import s from './Navbar.module.css';
+import Image from 'next/image';
+
+// Import SVG directly as a component asset from components/icons/
+import mcataiLogo from '@/components/icons/mcatai-logo.svg';
 
 interface NavlinksProps {
   user?: any;
@@ -14,15 +18,26 @@ interface NavlinksProps {
 
 export default function Navlinks({ user }: NavlinksProps) {
   const router = getRedirectMethod() === 'client' ? useRouter() : null;
-
+  
   return (
-    <div className="relative flex flex-row justify-between py-4 align-center md:py-6">
+    <div className="flex justify-between align-center border-b border-zinc-800 py-4">
       <div className="flex items-center flex-1">
-        <Link href="/" className={s.logo} aria-label="Logo">
-          <Logo />
-        </Link>
+        <div className="inline-flex items-center gap-2">
+          <Image
+            src={mcataiLogo}
+            alt="MCATai Logo"
+            width={32}
+            height={32}
+            priority
+            className="shrink-0"
+          />
+          <span className="text-sm font-medium text-white tracking-wide whitespace-nowrap">
+            MCATai
+          </span>
+        </div>
         <nav className="ml-6 space-x-2 lg:block">
-          <Link href="/" className={s.link}>
+          {/* Updated to link to /dashboard */}
+          <Link href="/dashboard" className={s.link}>
             Pricing
           </Link>
           {user && (

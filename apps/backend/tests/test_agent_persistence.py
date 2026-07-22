@@ -1,3 +1,4 @@
+import json
 import os
 import uuid
 
@@ -16,6 +17,41 @@ TEST_DATABASE_URL = os.environ.get(
 SEED_DATABASE_URL = os.environ.get("SEED_DATABASE_URL", "postgresql:///edulogicsai_nexus_test")
 
 pytestmark = pytest.mark.asyncio
+
+
+class _FakeGatewayClient:
+    """Mocks the LLM call (per test_intent_classifier.py's/test_aria.py's
+    established pattern) -- these tests exercise the DB-persistence wrapper,
+    not response content, so a fixed payload per call-shape is enough."""
+
+    ARIA_PAYLOAD = {
+        "response": "Let's start with what you already know about enzyme kinetics.",
+        "cited_chunks": [],
+        "frustration_detected": False,
+        "risk_level": "low",
+    }
+    QUESTION_PAYLOAD = {
+        "prompt_text": 'True or false: enzymes lower activation energy. Take your time -- what\'s your answer?',
+        "correct_answer": "true",
+        "correct_reason": "it reflects the retrieved material",
+        "distractor": "false",
+        "distractor_reason": "it contradicts the retrieved material",
+        "cited_chunks": [],
+    }
+    EVALUATION_PAYLOAD = {
+        "explanation": 'Correct! "true" is right because X. "false" is wrong because Y.',
+        "frustration_detected": False,
+    }
+
+    async def complete(self, model: str, messages: list[dict]) -> dict:
+        system_prompt = messages[0]["content"]
+        if "Evaluating an Answer" in system_prompt:
+            payload = self.EVALUATION_PAYLOAD
+        elif "Presenting a New Question" in system_prompt:
+            payload = self.QUESTION_PAYLOAD
+        else:
+            payload = self.ARIA_PAYLOAD
+        return {"choices": [{"message": {"content": json.dumps(payload)}}]}
 
 
 @pytest.fixture
@@ -65,12 +101,14 @@ async def test_persistent_agent_writes_real_episodic_memory_and_matches_unwrappe
     student_id, session_id = await _seed_student_with_session(seed_conn, pool)
     agent_input = _make_input(student_id, session_id)
 
+    gateway_client = _FakeGatewayClient()
+
     unwrapped_outputs = []
-    async for output in Aria().respond(agent_input):
+    async for output in Aria(gateway_client=gateway_client).respond(agent_input):
         unwrapped_outputs.append(output)
 
     episodic_repo = EpisodicMemoryRepository(pool)
-    wrapped = PersistentAgent(Aria(), episodic_repo)
+    wrapped = PersistentAgent(Aria(gateway_client=gateway_client), episodic_repo)
 
     wrapped_outputs = []
     async for output in wrapped.stream(agent_input):
@@ -90,7 +128,7 @@ async def test_quinn_persistent_agent_adjusts_ease_factor_on_correct_answer(
     student_id, session_id = await _seed_student_with_session(seed_conn, pool)
     episodic_repo = EpisodicMemoryRepository(pool)
     mastery_repo = ConceptMasteryRepository(pool)
-    wrapped = QuinnPersistentAgent(Quinn(), episodic_repo, mastery_repo)
+    wrapped = QuinnPersistentAgent(Quinn(gateway_client=_FakeGatewayClient()), episodic_repo, mastery_repo)
 
     # Turn 1: present a question (no DB effect on concept_mastery yet).
     fresh_input = _make_input(student_id, session_id)
@@ -131,7 +169,7 @@ async def test_quinn_persistent_agent_adjusts_ease_factor_on_incorrect_answer(
     student_id, session_id = await _seed_student_with_session(seed_conn, pool)
     episodic_repo = EpisodicMemoryRepository(pool)
     mastery_repo = ConceptMasteryRepository(pool)
-    wrapped = QuinnPersistentAgent(Quinn(), episodic_repo, mastery_repo)
+    wrapped = QuinnPersistentAgent(Quinn(gateway_client=_FakeGatewayClient()), episodic_repo, mastery_repo)
 
     fresh_input = _make_input(student_id, session_id)
     fresh_outputs = [o async for o in wrapped.stream(fresh_input)]

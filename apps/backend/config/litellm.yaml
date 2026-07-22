@@ -6,7 +6,7 @@ model_list:
 
   - model_name: sonnet-tutor
     litellm_params:
-      model: anthropic/claude-sonnet-4-20250514
+      model: anthropic/claude-sonnet-4-6
       api_key: os.environ/ANTHROPIC_API_KEY
       cache_control_injection_points:
         - location: message
@@ -17,7 +17,7 @@ model_list:
   # changes/litellm-gateway/SPEC.md Out of Scope.
   - model_name: sonnet-eval-batch
     litellm_params:
-      model: anthropic/claude-sonnet-4-20250514
+      model: anthropic/claude-sonnet-4-6
       api_key: os.environ/ANTHROPIC_API_KEY
       mode: batch
 

@@ -49,6 +49,7 @@ export async function signInWithEmail(formData: FormData) {
   const callbackURL = getURL('/auth/callback');
 
   const email = String(formData.get('email')).trim();
+  const fullName = String(formData.get('full_name')).trim();
   let redirectPath: string;
 
   if (!isValidEmail(email)) {
@@ -103,6 +104,7 @@ export async function requestPasswordUpdate(formData: FormData) {
 
   // Get form data
   const email = String(formData.get('email')).trim();
+  const fullName = String(formData.get('full_name')).trim();
   let redirectPath: string;
 
   if (!isValidEmail(email)) {
@@ -146,6 +148,7 @@ export async function requestPasswordUpdate(formData: FormData) {
 export async function signInWithPassword(formData: FormData) {
   const cookieStore = cookies();
   const email = String(formData.get('email')).trim();
+  const fullName = String(formData.get('full_name')).trim();
   const password = String(formData.get('password')).trim();
   let redirectPath: string;
 
@@ -184,6 +187,7 @@ export async function signUp(formData: FormData) {
   const callbackURL = getURL('/auth/callback');
 
   const email = String(formData.get('email')).trim();
+  const fullName = String(formData.get('full_name')).trim();
   const password = String(formData.get('password')).trim();
   let redirectPath: string;
 
@@ -200,6 +204,7 @@ export async function signUp(formData: FormData) {
     email,
     password,
     options: {
+      data: { full_name: fullName },
       emailRedirectTo: callbackURL
     }
   });

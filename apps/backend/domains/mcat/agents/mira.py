@@ -3,70 +3,48 @@ MIRA -- the Motivation & Resilience Coach for MCATai.
 See changes/2026/07/15/mira-agent/SPEC.md (FR1-FR4) and
 domains/mcat/prompts/mira_v1.md for MIRA's authored system prompt.
 
-Distress/recovery detection here are interim keyword heuristics
-(SPEC.md FR3 and Gaps & Assumptions) behind swappable protocols, matching
-the pattern established for ARIA (changes/2026/07/10/aria-agent/).
+respond() calls Claude (via LiteLLMGatewayClient, model alias "sonnet-tutor")
+for the actual coaching content and for distress/recovery detection -- MIRA's
+whole purpose is reading emotional state, so (per the same "use the LLM's
+understanding, not keyword heuristics" requirement applied to ARIA)
+recovery detection and the reported risk_level both come from the model's
+own judgment now, not KeywordDistressEstimator/KeywordRecoverySignalClassifier
+(removed -- see llm_support.py for the shared JSON-completion plumbing).
 """
 
-import re
-from typing import AsyncIterator, List, Optional, Protocol
+from typing import AsyncIterator, List, Optional
 
-from domains._contracts.agent_io import AgentInput, AgentOutput, EpisodicMemory, Message
+from domains._contracts.agent_io import AgentInput, AgentOutput, EpisodicMemory
 from domains._contracts.base_agent import BaseAgent
+from domains.mcat.agents.llm_support import (
+    complete_json,
+    render_episodic_context,
+    render_session_history,
+    as_risk_level,
+    as_str,
+)
+from llm_gateway.client import LiteLLMGatewayClient, default_gateway_client
 from prompt_registry.client import FilePromptRegistryClient, PromptRegistryClient
 
-DISTRESS_MARKERS = [
-    "i can't do this anymore",
-    "i'm worthless",
-    "what's the point",
-    "i want to quit",
-    "i'm a failure",
-    "nothing works",
-    "i can't take it",
-]
+MIRA_JSON_CONTRACT = """
 
-RECOVERY_MARKERS = [
-    "feeling better",
-    "okay let's try again",
-    "i'm ready",
-    "thanks, that helps",
-    "i feel calmer",
-    "let's continue",
-]
+## Required Response Format
 
-MINIMIZING_PHRASES = ["it's not that hard", "it's not a big deal", "just relax"]
+Respond with ONLY a single JSON object -- no markdown code fences, no prose \
+outside the JSON. Use exactly these keys:
 
-
-class DistressEstimator(Protocol):
-    def estimate(self, recent_user_messages: List[Message]) -> float: ...
-
-
-class RecoverySignalClassifier(Protocol):
-    def detect(self, recent_user_messages: List[Message]) -> bool: ...
-
-
-class KeywordDistressEstimator:
-    """Interim heuristic -- see SPEC.md FR3. Replace with a real signal later."""
-
-    def estimate(self, recent_user_messages: List[Message]) -> float:
-        if not recent_user_messages:
-            return 0.0
-        hits = sum(
-            1
-            for msg in recent_user_messages
-            if any(marker in msg.content.lower() for marker in DISTRESS_MARKERS)
-        )
-        return hits / len(recent_user_messages)
-
-
-class KeywordRecoverySignalClassifier:
-    """Interim heuristic -- see SPEC.md FR3. Replace with a real signal later."""
-
-    def detect(self, recent_user_messages: List[Message]) -> bool:
-        return any(
-            any(marker in msg.content.lower() for marker in RECOVERY_MARKERS)
-            for msg in recent_user_messages
-        )
+{
+  "response": "<your coaching message, per all the guidance above>",
+  "recovered": true or false -- true only if the signals described in \
+\"When to Hand Off > Back to ARIA\" are present in the student's recent messages,
+  "risk_level": "low" | "medium" | "high" -- per \"When to Hand Off > Human \
+escalation\", high means genuine distress requiring human escalation, not \
+just normal academic frustration,
+  "session_notes": "<brief internal note: emotional state observed, \
+strategy offered, whether you see improvement -- stored for your next \
+session with this student>"
+}
+"""
 
 
 def _find_handoff_cause(episodic_context: List[EpisodicMemory], message: str) -> str:
@@ -85,12 +63,10 @@ class Mira(BaseAgent):
     def __init__(
         self,
         prompt_client: Optional[PromptRegistryClient] = None,
-        distress_estimator: Optional[DistressEstimator] = None,
-        recovery_classifier: Optional[RecoverySignalClassifier] = None,
+        gateway_client: Optional[LiteLLMGatewayClient] = None,
     ) -> None:
         self._prompt_client = prompt_client or FilePromptRegistryClient(domain="mcat")
-        self._distress_estimator = distress_estimator or KeywordDistressEstimator()
-        self._recovery_classifier = recovery_classifier or KeywordRecoverySignalClassifier()
+        self._gateway_client = gateway_client or default_gateway_client()
 
     async def fetch_prompt(self) -> str:
         return self._prompt_client.get_prompt("mira", "v1")
@@ -98,37 +74,30 @@ class Mira(BaseAgent):
     async def respond(self, input: AgentInput) -> AsyncIterator[AgentOutput]:
         handoff_cause = _find_handoff_cause(input.episodic_context, input.message)
 
-        response_parts = [
-            f"I hear you -- {handoff_cause} is genuinely hard, and you've been putting in real effort on it.",
-            "That effort matters, regardless of how it's gone so far.",
-            "Here's one thing that might help right now: take a short break, then come back to it "
-            "with a simpler version of the idea.",
-        ]
+        system_prompt = await self.fetch_prompt() + MIRA_JSON_CONTRACT
+        user_content = (
+            f"Why MIRA was brought in (what ARIA or the student's own message flagged): {handoff_cause}\n\n"
+            f"Student's message: {input.message}\n\n"
+            f"Episodic context (this student's history):\n{render_episodic_context(input.episodic_context)}\n\n"
+            f"Recent conversation this session:\n{render_session_history(input.session_history, limit=4)}"
+        )
 
-        recent_user_messages = [m for m in input.session_history if m.role == "user"][-2:]
-        distress_score = self._distress_estimator.estimate(recent_user_messages)
-        recovered = self._recovery_classifier.detect(recent_user_messages)
+        parsed = await complete_json(self._gateway_client, system_prompt, user_content)
 
-        risk_level = "low"
-        suggested_handoff: Optional[str] = None
+        risk_level = as_risk_level(parsed.get("risk_level"))
+        recovered = bool(parsed.get("recovered")) if risk_level != "high" else False
 
-        if distress_score > 0.85:
-            # Safety takes priority over a simultaneous recovery signal.
-            risk_level = "high"
-            response_parts.append(
-                "What you're carrying sounds like more than I'm equipped to help with alone -- "
-                "I want to make sure a person can check in with you about this."
-            )
-        elif recovered:
-            suggested_handoff = "aria"
+        # Safety takes priority over a simultaneous recovery signal -- even
+        # if the model reports both, high distress wins.
+        suggested_handoff: Optional[str] = "aria" if recovered else None
 
         yield AgentOutput(
-            response=" ".join(response_parts),
+            response=as_str(parsed.get("response")),
             agent_id=self.id,
             cited_chunks=[],
             suggested_handoff=suggested_handoff,
             mastery_update=None,
-            session_notes=f"distress_score: {distress_score:.2f}",
+            session_notes=as_str(parsed.get("session_notes")),
             risk_level=risk_level,
         )
 

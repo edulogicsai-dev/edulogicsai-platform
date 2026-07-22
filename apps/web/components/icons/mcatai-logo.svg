@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Dark Background -->
+    <radialGradient id="bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#092019" />
+      <stop offset="100%" stop-color="#050d0a" />
+    </radialGradient>
+
+    <!-- Emerald Glow Gradient -->
+    <linearGradient id="emerald" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00ff87" />
+      <stop offset="100%" stop-color="#60efff" />
+    </linearGradient>
+
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Base Circle -->
+  <circle cx="256" cy="256" r="240" fill="url(#bg)" stroke="#00ff87" stroke-width="6" opacity="0.4"/>
+
+  <!-- Main AI Hexagon Mesh -->
+  <polygon points="256,110 376,179 376,318 256,387 136,318 136,179" 
+           fill="none" stroke="url(#emerald)" stroke-width="8" filter="url(#glow)"/>
+           
+  <!-- Inner Neural Links -->
+  <g stroke="#00ff87" stroke-width="4" opacity="0.8" filter="url(#glow)">
+    <line x1="256" y1="110" x2="256" y2="387" />
+    <line x1="136" y1="179" x2="376" y2="318" />
+    <line x1="136" y1="318" x2="376" y2="179" />
+  </g>
+
+  <!-- Nodes -->
+  <g fill="#00ff87" filter="url(#glow)">
+    <circle cx="256" cy="110" r="10" />
+    <circle cx="376" cy="179" r="10" />
+    <circle cx="376" cy="318" r="10" />
+    <circle cx="256" cy="387" r="10" />
+    <circle cx="136" cy="318" r="10" />
+    <circle cx="136" cy="179" r="10" />
+    <circle cx="256" cy="248" r="14" fill="#ffffff" />
+  </g>
+
+  <!-- Cap Crown Overlay -->
+  <path d="M 100,190 L 256,120 L 412,190 L 256,260 Z" 
+        fill="none" stroke="url(#emerald)" stroke-width="12" stroke-linejoin="round" filter="url(#glow)" />
+</svg>

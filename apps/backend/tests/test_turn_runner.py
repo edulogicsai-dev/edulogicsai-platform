@@ -37,8 +37,8 @@ FRUSTRATED_SESSION_HISTORY = [
 
 
 @pytest.mark.asyncio
-async def test_aria_to_mira_handoff_with_no_cold_start() -> None:
-    # AC2 -- real ARIA and MIRA, no mocks
+async def test_aria_to_mira_handoff_with_no_cold_start(mock_llm_transport) -> None:
+    # AC2 -- real ARIA and MIRA, LLM calls mocked at the transport layer (conftest.py)
     domain_result = registry.resolve_domain("mcat")
     graph = build_graph(domain_result.config, registry)
 
@@ -107,7 +107,7 @@ async def test_max_hops_safeguard_terminates_infinite_handoff_loop() -> None:
 
 
 @pytest.mark.asyncio
-async def test_escalation_wins_over_simultaneous_handoff() -> None:
+async def test_escalation_wins_over_simultaneous_handoff(mock_llm_transport) -> None:
     # AC4 -- real ARIA can set both risk_level='high' and suggested_handoff on
     # one output (its medical-advice guard doesn't short-circuit the rest of
     # its logic), which is exactly the scenario this AC needs.
@@ -129,7 +129,7 @@ async def test_escalation_wins_over_simultaneous_handoff() -> None:
 
 
 @pytest.mark.asyncio
-async def test_checkpoint_continuity_across_turns() -> None:
+async def test_checkpoint_continuity_across_turns(mock_llm_transport) -> None:
     # AC5
     domain_result = registry.resolve_domain("mcat")
     graph = build_graph(domain_result.config, registry)

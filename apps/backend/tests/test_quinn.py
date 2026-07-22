@@ -50,8 +50,63 @@ def make_pending_memory(**overrides) -> EpisodicMemory:
     )
 
 
-async def respond_once(input: AgentInput):
-    quinn = Quinn()
+DEFAULT_QUESTION_PAYLOAD = {
+    "prompt_text": 'True or false: "Enzymes lower activation energy" accurately describes enzyme kinetics. Take your time -- what\'s your answer?',
+    "correct_answer": "true",
+    "correct_reason": "it reflects the retrieved material on enzyme_kinetics",
+    "distractor": "false",
+    "distractor_reason": "it contradicts the retrieved material on enzyme_kinetics",
+    "cited_chunks": ["chunk-1"],
+}
+
+
+def _correct_evaluation_payload(frustration_detected: bool = False) -> dict:
+    return {
+        "explanation": (
+            'Correct! "true" is right because it reflects the retrieved material on '
+            'enzyme_kinetics. "false" is wrong because it contradicts the retrieved '
+            "material on enzyme_kinetics."
+        ),
+        "frustration_detected": frustration_detected,
+    }
+
+
+def _incorrect_evaluation_payload(frustration_detected: bool = False) -> dict:
+    return {
+        "explanation": (
+            'Not quite. "true" is right because it reflects the retrieved material on '
+            'enzyme_kinetics. "false" is wrong because it contradicts the retrieved '
+            "material on enzyme_kinetics."
+        ),
+        "frustration_detected": frustration_detected,
+    }
+
+
+class _FakeGatewayClient:
+    """Returns question_payload for question-generation calls (system prompt
+    contains QUESTION_JSON_CONTRACT's marker) and evaluation_payload for
+    answer-evaluation calls -- distinguished by the distinct required-keys
+    each contract asks for, mirroring how the real prompts differ."""
+
+    def __init__(self, question_payload: dict = None, evaluation_payload: dict = None) -> None:
+        self._question_payload = question_payload or DEFAULT_QUESTION_PAYLOAD
+        self._evaluation_payload = evaluation_payload
+
+    async def complete(self, model: str, messages: list[dict]) -> dict:
+        system_prompt = messages[0]["content"]
+        if "Evaluating an Answer" in system_prompt:
+            payload = self._evaluation_payload or _correct_evaluation_payload()
+        else:
+            payload = self._question_payload
+        return {"choices": [{"message": {"content": json.dumps(payload)}}]}
+
+
+def make_quinn(question_payload: dict = None, evaluation_payload: dict = None) -> Quinn:
+    return Quinn(gateway_client=_FakeGatewayClient(question_payload, evaluation_payload))
+
+
+async def respond_once(input: AgentInput, quinn: Quinn = None):
+    quinn = quinn or make_quinn()
     async for output in quinn.respond(input):
         return output
     raise AssertionError("respond() yielded no output")
@@ -80,7 +135,7 @@ async def test_no_pending_question_presents_one_question_and_withholds_answer():
 async def test_correct_answer_gives_full_distractor_analysis():
     # AC2
     input = make_input(message="true", episodic_context=[make_pending_memory()])
-    output = await respond_once(input)
+    output = await respond_once(input, make_quinn(evaluation_payload=_correct_evaluation_payload()))
     lowered = output.response.lower()
     assert "correct" in lowered
     assert "is right because" in lowered
@@ -91,7 +146,7 @@ async def test_correct_answer_gives_full_distractor_analysis():
 async def test_incorrect_answer_gives_full_distractor_analysis():
     # AC2
     input = make_input(message="false", episodic_context=[make_pending_memory()])
-    output = await respond_once(input)
+    output = await respond_once(input, make_quinn(evaluation_payload=_incorrect_evaluation_payload()))
     lowered = output.response.lower()
     assert "not quite" in lowered
     assert "is right because" in lowered
@@ -105,7 +160,7 @@ async def test_three_consecutive_wrong_triggers_aria_handoff():
         message="false",
         episodic_context=[make_pending_memory(consecutive_wrong=2, consecutive_correct=0)],
     )
-    output = await respond_once(input)
+    output = await respond_once(input, make_quinn(evaluation_payload=_incorrect_evaluation_payload()))
     assert output.suggested_handoff == "aria"
 
 
@@ -118,13 +173,14 @@ async def test_five_questions_at_high_accuracy_triggers_scout_handoff():
             make_pending_memory(questions_completed=4, correct_count=4, consecutive_wrong=0)
         ],
     )
-    output = await respond_once(input)
+    output = await respond_once(input, make_quinn(evaluation_payload=_correct_evaluation_payload()))
     assert output.suggested_handoff == "scout"
 
 
 @pytest.mark.asyncio
 async def test_frustration_wins_over_simultaneous_wrong_streak():
-    # AC6
+    # AC6 -- frustration now comes from the model's own judgment (req 6),
+    # not a keyword list; the fake simply reports it, as the real model would.
     session_history = [
         Message(role="user", content="i don't get it at all", timestamp="2026-01-01T00:00:00Z"),
         Message(role="user", content="this is so frustrating", timestamp="2026-01-01T00:01:00Z"),
@@ -135,13 +191,15 @@ async def test_frustration_wins_over_simultaneous_wrong_streak():
         session_history=session_history,
         episodic_context=[make_pending_memory(consecutive_wrong=2)],
     )
-    output = await respond_once(input)
+    output = await respond_once(
+        input, make_quinn(evaluation_payload=_incorrect_evaluation_payload(frustration_detected=True))
+    )
     assert output.suggested_handoff == "mira"
 
 
 @pytest.mark.asyncio
 async def test_medical_advice_request_declined_with_high_risk():
-    # AC7
+    # AC7 -- deterministic guard, no LLM call happens on this path at all.
     input = make_input(message="Do I have appendicitis based on this pain?")
     output = await respond_once(input)
     assert output.risk_level == "high"
@@ -182,8 +240,33 @@ async def test_never_skips_distractor_analysis_when_handing_off():
         message="false",
         episodic_context=[make_pending_memory(consecutive_wrong=2)],
     )
-    output = await respond_once(input)
+    output = await respond_once(input, make_quinn(evaluation_payload=_incorrect_evaluation_payload()))
     assert output.suggested_handoff == "aria"
     lowered = output.response.lower()
     assert "is right because" in lowered
     assert "is wrong because" in lowered
+
+
+@pytest.mark.asyncio
+async def test_correct_streak_continues_with_llm_generated_next_question():
+    # Not previously covered: the "continue" path (no handoff) must call the
+    # generator again for a real next question, appended after the explanation.
+    input = make_input(message="true", episodic_context=[make_pending_memory()])
+    next_question_payload = {
+        "prompt_text": 'True or false: "Vmax is unchanged by competitive inhibition." Take your time -- what\'s your answer?',
+        "correct_answer": "true",
+        "correct_reason": "competitive inhibitors are overcome by excess substrate",
+        "distractor": "false",
+        "distractor_reason": "that's true of non-competitive inhibition instead",
+        "cited_chunks": [],
+    }
+    quinn = Quinn(
+        gateway_client=_FakeGatewayClient(
+            question_payload=next_question_payload,
+            evaluation_payload=_correct_evaluation_payload(),
+        )
+    )
+    output = await respond_once(input, quinn)
+    assert output.suggested_handoff is None
+    assert "Vmax is unchanged" in output.response
+    assert output.session_notes.startswith(PENDING_MARKER_PREFIX)
