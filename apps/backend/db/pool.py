@@ -1,10 +1,10 @@
-"""
-Connection pool -- DSN read from an environment variable, never hardcoded.
-See changes/2026/07/17/nexus-orchestration/changes/database-wiring/SPEC.md FR1.
-"""
-
 import asyncpg
 
 
 async def create_pool(dsn: str) -> asyncpg.Pool:
-    return await asyncpg.create_pool(dsn)
+    return await asyncpg.create_pool(
+        dsn,
+        statement_cache_size=0,  # Required for Supabase connection pooler
+        min_size=1,
+        max_size=5,
+    )
