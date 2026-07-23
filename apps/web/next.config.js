@@ -8,7 +8,13 @@ const nextConfig = {
     serverComponentsExternalPackages: ['stripe']
   },
   webpack: (config) => {
-    config.resolve.modules.push(path.resolve('../../node_modules'));
+    // Force Webpack to resolve single instance of React & React-dom
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      react: path.resolve(__dirname, 'node_modules/react'),
+      'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
+    };
+    // config.resolve.modules.push(path.resolve('../../node_modules'));
     return config;
   }
 }
