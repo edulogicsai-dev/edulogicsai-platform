@@ -32,3 +32,4 @@ apps/mobile/.expo/
 .DS_Store
 *.log
 .turbo/
+turbo.json
