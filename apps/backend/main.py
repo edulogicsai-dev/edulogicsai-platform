@@ -39,7 +39,7 @@ app = FastAPI(title="EduLogicsAI Backend", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=["http://localhost:3000", "http://localhost:3001", "https://edulogicsai-platform.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
