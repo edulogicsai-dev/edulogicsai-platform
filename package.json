@@ -1,4 +1,6 @@
 {
   "name": "mcatai-platform",
-  "private": true
+  "private": true,
+  "packageManager": "npm@10.0.0",
+  "workspaces": ["apps/*", "packages/*"]
 }
