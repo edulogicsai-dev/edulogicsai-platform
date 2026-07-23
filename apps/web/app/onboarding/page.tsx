@@ -7,7 +7,7 @@ import OnboardingForm from '@/components/ui/OnboardingForm/OnboardingForm';
 // student_profiles row a first-time signup doesn't have yet. Returning
 // users (row already exists) are bounced straight to /dashboard -- AC3.
 export default async function Onboarding() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const {
     data: { user }
   } = await supabase.auth.getUser();

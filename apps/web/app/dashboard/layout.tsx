@@ -9,7 +9,7 @@ import DashboardShell from '@/components/ui/Dashboard/DashboardShell';
 // Fetched once here (not duplicated in page.tsx) since a redirect() thrown
 // during layout render aborts the page render too.
 export default async function DashboardLayout({ children }: PropsWithChildren) {
-  const supabase = createClient();
+  const supabase = await createClient();
   const {
     data: { user }
   } = await supabase.auth.getUser();
